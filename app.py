@@ -10,10 +10,9 @@ import google.generativeai as genai
 # ---------------------------------------------------------
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
-# CSS: 디자인 강화 + 파일 업로더 한글화
+# CSS: 노란색 하이라이트 디자인 + 파일 업로더 한글화
 st.markdown("""
 <style>
-    /* 1. 입력창 디자인 (노란색 포스트잇 스타일) */
     div[data-baseweb="input"] {
         background-color: #ffffd0 !important;
         border: 1px solid #dcdcdc !important;
@@ -34,13 +33,9 @@ st.markdown("""
         font-weight: bold !important;
         font-size: 16px !important;
     }
-    
-    /* 2. [NEW] 파일 업로더 문구 한글화 (CSS Hack) */
-    /* 기존 영어 텍스트 숨기기 */
     section[data-testid="stFileUploaderDropzone"] > div > div > small {
         display: none !important;
     }
-    /* 한글 텍스트 덮어쓰기 */
     section[data-testid="stFileUploaderDropzone"] > div > div::after {
         content: "여기에 파일을 드래그하거나 클릭하여 업로드하세요.";
         font-size: 14px;
@@ -408,7 +403,6 @@ if st.session_state.scenarios:
                 "이익률": res['margin']
             })
         df_summary = pd.DataFrame(summary_rows)
-        # [수정] 헤더 표시 형식 변경: (월) 표기 추가
         st.dataframe(df_summary.style.format({
                 "총 매출 (월)": "{:,.0f}", 
                 "총 인건비 (월)": "{:,.0f}", 
@@ -446,9 +440,10 @@ if st.session_state.scenarios:
                 else: return ['background-color: white; color: #2980b9'] * len(row)
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=800)
 
+    # [수정된 AI 컨설팅 탭 - Deep Analysis Prompt]
     with tab5:
         st.subheader("🤖 AI 경영 컨설턴트 (Powered by Gemini)")
-        st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
+        st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략, 손익분기점, 연료 민감도**를 심층 분석합니다.")
         
         with st.expander("ℹ️ AI 라이브러리 버전 확인"):
             st.write(f"현재 설치된 버전: **{genai.__version__}**")
@@ -460,24 +455,64 @@ if st.session_state.scenarios:
                 st.error("API Key가 필요합니다.")
             else:
                 try:
-                    response_text, model_name = get_ai_response(api_key, f"""
-                    당신은 전문적인 택시 회사 경영 컨설턴트입니다.
-                    아래는 택시 회사의 시나리오별 예상 수익 분석입니다.
-                    [데이터 요약]
-                    {summary_rows}
+                    # 1. AI에게 보낼 상세 데이터 구성 (Context)
+                    context_info = f"""
+                    [기초 환경 데이터]
+                    - 현재 총 기사 수: {total_drivers}명 / 총 차량 대수: {n_cars}대
+                    - LPG 단가: {lpg_price}원/L (VAT포함)
+                    - 월 만근일수: {full_days}일
+                    - 차량 1대당 월 고정비(감가+보험+유지): 약 {int(car_fixed_cost_monthly):,}원
+                    - 월 총 고정비(임대료+관리비+유휴차량비용): 약 {int(total_overhead_sum):,}원
+                    - 1인당 배부된 월 공통비: {int(cost_overhead):,}원
                     
-                    다음 내용을 포함한 보고서를 한국어로 작성해주세요:
-                    1. **최고의 시나리오 추천:** 이익이 가장 좋은 안은 무엇인가요?
-                    2. **리스크 분석:** 인건비율이 적정한가요? (통상 60~70% 기준)
-                    3. **전략 제안:** 경영진이 고려해야 할 구체적인 개선점은?
-                    """)
+                    [시나리오별 상세 결과]
+                    """
                     
-                    st.success(f"✅ 분석 완료! (사용된 모델: {model_name})")
+                    for res in all_results_data:
+                        context_info += f"\n👉 시나리오명: {res['name']}\n"
+                        context_info += f"   - 월 매출: {int(res['revenue']):,}원 / 월 영업이익: {int(res['profit']):,}원\n"
+                        context_info += f"   - 영업이익률: {res['margin']:.2f}% / 인건비율: {res['labor_rate']:.2f}%\n"
+                        context_info += f"   - (참고) 이 시나리오의 1인당 평균 인건비: {int(res['labor']/total_drivers):,}원\n"
+
+                    # 2. 강력해진 프롬프트 (Prompt Engineering)
+                    prompt = f"""
+                    당신은 노련한 '택시 회사 경영 전문 컨설턴트'입니다.
+                    아래 제공된 [기초 환경 데이터]와 [시나리오별 상세 결과]를 바탕으로 정밀한 경영 분석 보고서를 작성해 주세요.
+                    단순히 결과를 나열하지 말고, 경영자가 의사결정을 할 수 있도록 구체적인 통찰(Insight)을 제공해야 합니다.
+
+                    [분석할 데이터]
+                    {context_info}
+
+                    [작성 요청 사항] - 아래 목차에 따라 분석해 주세요.
+                    
+                    1. 🏆 **최적 시나리오 선정 및 이유**
+                       - 수익성(이익률)과 안정성(인건비 비중) 측면에서 가장 추천하는 시나리오는 무엇인가요?
+                       
+                    2. ⛽ **연료비 민감도 분석 (Risk Check)**
+                       - 현재 LPG 가격이 {lpg_price}원인데, 만약 연료비가 10% 상승한다면 수익성에 어떤 타격이 있을지 예상해 주세요.
+                       
+                    3. 👥 **인력 운영 전략 (일차 vs 교대)**
+                       - 차량 1대를 혼자 쓰는 '일차' 방식과 2인이 쓰는 '교대(주/야)' 방식 중, 현재 비용 구조(차량 고정비 등)에서 회사에 더 이득인 방향은 무엇인가요?
+                       - 유휴 차량(Empty Slot) 비용을 줄이기 위해 어떤 채용 전략이 필요한가요?
+                       
+                    4. 📉 **손익분기점(BEP) 추정**
+                       - 현재 고정비(임대료, 관리비 등)를 감당하려면, 기사 수가 최소 몇 명 이상이어야 적자를 면할 수 있을지 대략적으로 추산해 주세요.
+                       
+                    5. 💡 **최종 경영 제언**
+                       - 사납금 조정, 차량 가동률 증대 등 구체적인 실행 전략을 1~2줄로 요약해 주세요.
+
+                    톤앤매너: 전문적이고 냉철하게, 하지만 경영자를 설득하는 부드러운 어조로 한국어로 작성해 주세요.
+                    """
+                    
+                    # 3. AI 호출
+                    response_text, model_name = get_ai_response(api_key, prompt)
+                    
+                    st.success(f"✅ 심층 분석 완료! (모델: {model_name})")
                     st.markdown(response_text)
                     
                 except Exception as e:
                     st.error(f"AI 오류: {e}")
-                    st.info("💡 팁: requirements.txt에 'google-generativeai>=0.7.0'이 포함되어 있는지 확인하고 앱을 Reboot 해주세요.")
+                    st.info("💡 팁: requirements.txt 버전을 확인해 주세요.")
 
 else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
