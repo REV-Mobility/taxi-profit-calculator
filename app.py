@@ -57,24 +57,13 @@ def load_data_callback():
         except Exception as e:
             st.error(f"데이터 파일 읽기 실패: {e}")
 
-# [NEW] AI 모델 자동 매칭 함수 (오류 방지용)
+# AI 모델 호출 함수 (단일 모델 지정)
 def get_ai_response(api_key, prompt):
     genai.configure(api_key=api_key)
-    
-    # 시도할 모델 리스트 (우선순위 순)
-    candidate_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
-    
-    last_error = None
-    for model_name in candidate_models:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            return response.text, model_name # 성공하면 텍스트와 모델명 반환
-        except Exception as e:
-            last_error = e
-            continue # 실패하면 다음 모델 시도
-            
-    raise last_error # 모든 모델 실패 시 에러 발생
+    # 최신 라이브러리에서는 flash 모델이 가장 안정적임
+    model = genai.GenerativeModel('gemini-1.5-flash') 
+    response = model.generate_content(prompt)
+    return response.text
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
@@ -192,7 +181,6 @@ st.markdown("---")
 st.header("3. 상세 검증 및 분석")
 
 if st.session_state.scenarios:
-    # --- 공통 비용 및 단위 계산 ---
     net_rent_cost = rent_cost / 1.1
     per_person_rent = net_rent_cost / total_drivers if total_drivers > 0 else 0
     per_person_admin = admin_salary_total / total_drivers if total_drivers > 0 else 0
@@ -408,6 +396,11 @@ if st.session_state.scenarios:
     with tab5:
         st.subheader("🤖 AI 경영 컨설턴트 (Powered by Gemini)")
         st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
+        
+        # [NEW] 라이브러리 버전 확인용 디버깅 (필요 시 펼쳐보세요)
+        with st.expander("ℹ️ 라이브러리 버전 확인"):
+            st.write(f"Installed google-generativeai version: {genai.__version__}")
+            
         api_key = st.text_input("Google API Key를 입력하세요", type="password")
         
         if st.button("AI 분석 요청하기"):
@@ -415,8 +408,7 @@ if st.session_state.scenarios:
                 st.error("API Key가 필요합니다.")
             else:
                 try:
-                    # [NEW] 모델명을 자동/순차적으로 시도하는 함수 호출
-                    response_text, model_name = get_ai_response(api_key, f"""
+                    response_text = get_ai_response(api_key, f"""
                     당신은 전문적인 택시 회사 경영 컨설턴트입니다.
                     아래는 택시 회사의 시나리오별 예상 수익 분석입니다.
                     [데이터 요약]
@@ -428,11 +420,11 @@ if st.session_state.scenarios:
                     3. **전략 제안:** 경영진이 고려해야 할 구체적인 개선점은?
                     """)
                     
-                    st.success(f"✅ 분석 완료! (사용된 모델: {model_name})")
                     st.markdown(response_text)
                     
                 except Exception as e:
                     st.error(f"AI 오류: {e}")
+                    st.info("💡 팁: requirements.txt에 'google-generativeai>=0.7.0'이 포함되어 있는지 확인하고 앱을 Reboot 해주세요.")
 
 else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
@@ -444,7 +436,6 @@ with st.sidebar:
     st.markdown("---")
     st.header("📂 데이터 저장 / 불러오기")
     
-    # [핵심] 콜백 함수 등록 (on_change=load_data_callback)
     st.file_uploader(
         "저장된 파일 열기 (JSON)", 
         type=["json"], 
