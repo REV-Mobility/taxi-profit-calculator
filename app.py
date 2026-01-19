@@ -25,7 +25,6 @@ with st.sidebar:
     
     with st.expander("① 인력 및 차량 구성", expanded=True):
         col1, col2 = st.columns(2)
-        # 디폴트값 제거 (0으로 설정)
         n_day = col1.number_input("주간 기사 수", value=0)
         n_night = col2.number_input("야간 기사 수", value=0)
         n_shift = col1.number_input("교대 기사 수", value=0)
@@ -37,7 +36,6 @@ with st.sidebar:
 
     with st.expander("② 차량 및 운영 비용 (VAT 포함값)", expanded=True):
         st.info("내부 계산 시 /1.1 하여 공급가액만 비용 반영함")
-        # 디폴트값 제거 (0으로 설정)
         car_price = currency_input("차량 구입비", 0, step=1000000)
         car_dep_years = st.number_input("감가상각년수 (년)", value=0)
         car_maint = currency_input("차량 유지비 (1대/월)", 0, step=10000)
@@ -60,7 +58,6 @@ with st.sidebar:
 
     with st.expander("④ 2026년 4대보험 요율 (고정값)", expanded=True):
         st.caption("※ 2026년 기준 요율 (수정 가능)")
-        # 여기는 요청하신 대로 디폴트 값 유지
         rate_pension = st.number_input("국민연금 (%)", value=4.75, format="%.2f") / 100
         rate_health = st.number_input("건강보험 (%)", value=3.595, format="%.3f") / 100
         rate_care_ratio = st.number_input("장기요양(건보료비례 %)", value=13.14, format="%.2f") / 100
@@ -80,7 +77,7 @@ if 'scenarios' not in st.session_state:
 
 with st.form("scenario_form"):
     c_name, c_wage, c_time = st.columns([2, 1, 1])
-    s_name = c_name.text_input("시나리오 이름", "") # 빈칸
+    s_name = c_name.text_input("시나리오 이름", "")
     s_hourly = c_wage.number_input("통상 시급(원)", value=0, format="%d")
     s_work_time = c_time.number_input("1일 소정근로(시간)", value=0.0, step=0.1, format="%.2f")
 
@@ -94,7 +91,6 @@ with st.form("scenario_form"):
     def input_row(label):
         c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
         c1.markdown(f"###### {label}")
-        # 디폴트 0으로 설정
         pay = c2.number_input(f"{label}총액", value=0, step=10000, label_visibility="collapsed")
         tf = c3.number_input(f"{label}비과세", value=0, step=10000, label_visibility="collapsed")
         sanap = c4.number_input(f"{label}사납금", value=0, step=1000, label_visibility="collapsed")
@@ -127,7 +123,7 @@ st.markdown("---")
 st.header("3. 상세 검증 및 분석")
 
 if st.session_state.scenarios:
-    # --- 공통 비용 및 단위 계산 (0 나누기 방지) ---
+    # --- 공통 비용 및 단위 계산 ---
     net_rent_cost = rent_cost / 1.1
     per_person_rent = net_rent_cost / total_drivers if total_drivers > 0 else 0
     per_person_admin = admin_salary_total / total_drivers if total_drivers > 0 else 0
@@ -138,7 +134,6 @@ if st.session_state.scenarios:
         net_car_price = car_price / 1.1
         net_car_maint = car_maint / 1.1
         
-        # 감가상각년수가 0이면 0 처리 (에러 방지)
         c_dep = (net_car_price / car_dep_years / 12) * ratio if car_dep_years > 0 else 0
         c_ins = (insurance_year / 12) * ratio 
         c_maint = net_car_maint * ratio
@@ -149,7 +144,6 @@ if st.session_state.scenarios:
         hourly_wage = sc_data['hourly']
         work_time_sc = sc_data['work_time']
         
-        # 사납금 결정
         s_day = override_sanap['day'] if override_sanap else sc_data['day']['sanap']
         s_night = override_sanap['night'] if override_sanap else sc_data['night']['sanap']
         s_shift = override_sanap['shift'] if override_sanap else sc_data['shift']['sanap']
@@ -171,17 +165,15 @@ if st.session_state.scenarios:
         for t_name, count, sanap, fuel, pay, tf, d_type in types:
             if count == 0: continue
             
-            # 매출
             monthly_sanap = sanap * full_days
-            # 변동비
             vat_out = monthly_sanap * (10 / 110)
             card_fee = monthly_sanap * 0.015
             fuel_liter = fuel * full_days
             net_fuel_cost = fuel_liter * (lpg_price / 1.1)
-            # 차량비
+            
             c_dep, c_ins, c_maint = get_car_cost_details(d_type)
             total_car_fixed = c_dep + c_ins + c_maint
-            # 인건비
+            
             total_pay = pay
             taxable_pay = pay - tf
             if taxable_pay < 0: taxable_pay = 0
@@ -193,16 +185,13 @@ if st.session_state.scenarios:
             ins_care = ins_health * rate_care_ratio
             ins_emp = taxable_pay * (rate_emp_unemp + rate_emp_stabil)
             ins_sanjae = total_pay * rate_sanjae
-            
             total_4ins = ins_pension + ins_health + ins_care + ins_emp + ins_sanjae
             total_labor_cost = total_pay + severance + annual_leave + total_4ins
             
-            # 이익
             total_cost_person = (vat_out + card_fee + net_fuel_cost + total_car_fixed + total_labor_cost + cost_overhead)
             profit_person = monthly_sanap - total_cost_person
             
             group_profit = profit_person * count
-            
             total_profit += group_profit
             total_revenue += (monthly_sanap * count)
             total_labor += (total_labor_cost * count)
@@ -219,36 +208,28 @@ if st.session_state.scenarios:
             
             rows = []
             rows.append(("1. 월 매출(사납금)", monthly_sanap, f"{sanap:,}원 × {full_days}일"))
-            
             rows.append(("▼ 매출 공제(세금/수수료)", -(vat_out + card_fee), ""))
             rows.append(("   └ 부가세(매출세액)", -vat_out, "사납금의 10/110"))
             rows.append(("   └ 카드수수료", -card_fee, "사납금의 1.5%"))
-            
             rows.append(("▼ 연료비(Net)", -net_fuel_cost, "부가세 제외 공급가 기준"))
-            
             rows.append(("▼ 차량 고정비 합계", -total_car_fixed, "감가+보험+유지"))
             rows.append(("   └ 감가상각비", -c_dep, ""))
             rows.append(("   └ 보험료", -c_ins, ""))
             rows.append(("   └ 유지비", -c_maint, ""))
-            
             rows.append(("▼ 인건비 합계", -total_labor_cost, f"매출 대비 {labor_ratio:.1f}%"))
             rows.append(("   └ 급여 지급액(Gross)", -total_pay, "입력된 총액"))
             rows.append(("   └ 퇴직금 적립액", -severance, "급여총액 ÷ 12"))
             rows.append(("   └ 연차수당", -annual_leave, f"{hourly_wage:,}원×{work_time_sc}h×1.25"))
-            
             rows.append(("   ▼ [상세] 4대보험 계", -total_4ins, ""))
             rows.append(("      - 국민연금", -ins_pension, f"{rate_pension*100:.2f}%"))
             rows.append(("      - 건강보험", -ins_health, f"{rate_health*100:.3f}%"))
             rows.append(("      - 장기요양", -ins_care, f"건보료의 {rate_care_ratio*100:.2f}%"))
             rows.append(("      - 고용보험", -ins_emp, f"{(rate_emp_unemp+rate_emp_stabil)*100:.2f}%"))
             rows.append(("      - 산재보험", -ins_sanjae, f"{rate_sanjae*100:.2f}%"))
-            
             rows.append(("▼ 공통 운영비 합계", -cost_overhead, ""))
             rows.append(("   └ 차고지 임대료", -per_person_rent, ""))
             rows.append(("   └ 관리직원 급여", -per_person_admin, ""))
-            
             rows.append(("■ 최종 영업이익", profit_person, "매출 - 비용합계"))
-            
             debug_rows[f"{sc_data['name']} - {t_name}"] = rows
 
         profit_margin = (total_profit / total_revenue * 100) if total_revenue > 0 else 0
@@ -267,7 +248,6 @@ if st.session_state.scenarios:
 
     # --- 계산 실행 ---
     all_results_data = [calculate_scenario(sc) for sc in st.session_state.scenarios]
-    
     global_debug = {}
     for res in all_results_data:
         global_debug.update(res['debug'])
@@ -275,7 +255,7 @@ if st.session_state.scenarios:
     # --- 탭 구성 ---
     tab1, tab2, tab3, tab4 = st.tabs(["🎛️ 사납금 조정 시뮬레이션", "🏆 시나리오 총괄 비교", "📊 근무형태별 분석", "🧾 상세 계산 검증"])
 
-    # [Tab 1] 사납금 조정 시뮬레이션
+    # [Tab 1] 사납금 조정 (수정됨: 키 값을 동적으로 부여)
     with tab1:
         st.subheader("🎛️ 사납금 조정 시뮬레이터 (What-If)")
         sc_names = [sc['name'] for sc in st.session_state.scenarios]
@@ -284,12 +264,14 @@ if st.session_state.scenarios:
         selected_sc_idx = sc_names.index(selected_sc_name)
         origin_sc = st.session_state.scenarios[selected_sc_idx]
         
-        st.write("▼ **변경할 1일 사납금 입력**")
+        st.write(f"▼ **'{selected_sc_name}'의 1일 사납금을 조정해 보세요.**")
         ac1, ac2, ac3, ac4 = st.columns(4)
-        new_day = ac1.number_input("주간 사납금", value=origin_sc['day']['sanap'], step=1000, key="sim_day")
-        new_night = ac2.number_input("야간 사납금", value=origin_sc['night']['sanap'], step=1000, key="sim_night")
-        new_shift = ac3.number_input("교대 사납금", value=origin_sc['shift']['sanap'], step=1000, key="sim_shift")
-        new_daily = ac4.number_input("일차 사납금", value=origin_sc['daily']['sanap'], step=1000, key="sim_daily")
+        
+        # [핵심 수정] key에 selected_sc_idx를 포함시켜서 시나리오 변경 시 입력창 값을 강제 리셋(업데이트)
+        new_day = ac1.number_input("주간 사납금", value=origin_sc['day']['sanap'], step=1000, key=f"sim_day_{selected_sc_idx}")
+        new_night = ac2.number_input("야간 사납금", value=origin_sc['night']['sanap'], step=1000, key=f"sim_night_{selected_sc_idx}")
+        new_shift = ac3.number_input("교대 사납금", value=origin_sc['shift']['sanap'], step=1000, key=f"sim_shift_{selected_sc_idx}")
+        new_daily = ac4.number_input("일차 사납금", value=origin_sc['daily']['sanap'], step=1000, key=f"sim_daily_{selected_sc_idx}")
         
         override_map = {'day': new_day, 'night': new_night, 'shift': new_shift, 'daily': new_daily}
         sim_result = calculate_scenario(origin_sc, override_map)
@@ -311,7 +293,7 @@ if st.session_state.scenarios:
             st.success("✅ 업데이트 완료! 다른 탭에서 변경된 결과를 확인하세요.")
             st.rerun()
 
-    # [Tab 2] 총괄 비교
+    # [Tab 2, 3, 4] 기존 로직 유지
     with tab2:
         st.subheader("🏆 시나리오 총괄 비교표")
         summary_rows = []
@@ -330,7 +312,6 @@ if st.session_state.scenarios:
                 "인건비율": "{:.1f}%", "이익률": "{:.1f}%"
             }).background_gradient(subset=["영업이익", "이익률"], cmap="Greens").background_gradient(subset=["총 인건비", "인건비율"], cmap="Reds"), use_container_width=True)
 
-    # [Tab 3] 근무형태별 분석
     with tab3:
         st.subheader("🧐 근무 형태별 수익성 상세")
         if all_results_data:
@@ -347,7 +328,6 @@ if st.session_state.scenarios:
             fig_rate.update_traces(texttemplate='%{text:.1f}%')
             c2.plotly_chart(fig_rate, use_container_width=True)
 
-    # [Tab 4] 상세 계산 검증
     with tab4:
         st.info("💡 **[▼]** 표시된 항목은 합계, **[└]** 는 상세 내역입니다.")
         selected_key = st.selectbox("검증할 대상", list(global_debug.keys()))
