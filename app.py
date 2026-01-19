@@ -10,7 +10,7 @@ import google.generativeai as genai
 # ---------------------------------------------------------
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
-# CSS: 노란색 하이라이트 디자인 (가독성 강화)
+# CSS: 노란색 하이라이트 디자인
 st.markdown("""
 <style>
     div[data-baseweb="input"] {
@@ -37,7 +37,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def currency_input(label, value, step=10000, key=None):
-    # Session State 값이 있으면 우선 사용
     if key and key in st.session_state:
         value = st.session_state[key]
     val = st.number_input(label, value=value, step=step, format="%d", key=key)
@@ -45,33 +44,43 @@ def currency_input(label, value, step=10000, key=None):
         st.caption(f"👉 {int(val):,} 원") 
     return val
 
-# ---------------------------------------------------------
-# [핵심 수정] 데이터 로드 콜백 함수
-# (이 함수는 화면이 그려지기 '직전'에 실행되어 오류를 막습니다)
-# ---------------------------------------------------------
+# 데이터 로드 콜백
 def load_data_callback():
-    # 업로더 키('loader_widget')를 통해 파일 접근
     uploaded_file = st.session_state.loader_widget
     if uploaded_file is not None:
         try:
             data = json.load(uploaded_file)
-            
-            # 1. 기초 환경 변수 업데이트
             for key, value in data['basic_info'].items():
                 st.session_state[key] = value
-                
-            # 2. 시나리오 업데이트
             st.session_state.scenarios = data['scenarios']
-            
             st.toast("✅ 데이터가 성공적으로 복구되었습니다!", icon="📂")
         except Exception as e:
             st.error(f"데이터 파일 읽기 실패: {e}")
+
+# [NEW] AI 모델 자동 매칭 함수 (오류 방지용)
+def get_ai_response(api_key, prompt):
+    genai.configure(api_key=api_key)
+    
+    # 시도할 모델 리스트 (우선순위 순)
+    candidate_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+    
+    last_error = None
+    for model_name in candidate_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            return response.text, model_name # 성공하면 텍스트와 모델명 반환
+        except Exception as e:
+            last_error = e
+            continue # 실패하면 다음 모델 시도
+            
+    raise last_error # 모든 모델 실패 시 에러 발생
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 1. 사이드바: 회사 기초 환경 설정
+# 1. 사이드바
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("1. 회사 기초 환경 설정")
@@ -406,9 +415,8 @@ if st.session_state.scenarios:
                 st.error("API Key가 필요합니다.")
             else:
                 try:
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    prompt = f"""
+                    # [NEW] 모델명을 자동/순차적으로 시도하는 함수 호출
+                    response_text, model_name = get_ai_response(api_key, f"""
                     당신은 전문적인 택시 회사 경영 컨설턴트입니다.
                     아래는 택시 회사의 시나리오별 예상 수익 분석입니다.
                     [데이터 요약]
@@ -418,10 +426,11 @@ if st.session_state.scenarios:
                     1. **최고의 시나리오 추천:** 이익이 가장 좋은 안은 무엇인가요?
                     2. **리스크 분석:** 인건비율이 적정한가요?
                     3. **전략 제안:** 경영진이 고려해야 할 구체적인 개선점은?
-                    """
-                    with st.spinner("AI가 데이터를 분석 중입니다..."):
-                        response = model.generate_content(prompt)
-                        st.markdown(response.text)
+                    """)
+                    
+                    st.success(f"✅ 분석 완료! (사용된 모델: {model_name})")
+                    st.markdown(response_text)
+                    
                 except Exception as e:
                     st.error(f"AI 오류: {e}")
 
@@ -429,13 +438,13 @@ else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
 
 # ---------------------------------------------------------
-# [하단] 데이터 저장/불러오기 (UI는 하단, 로직은 상단 콜백에서 처리)
+# [하단] 데이터 저장/불러오기
 # ---------------------------------------------------------
 with st.sidebar:
     st.markdown("---")
     st.header("📂 데이터 저장 / 불러오기")
     
-    # [수정] 콜백 함수 등록 (on_change=load_data_callback)
+    # [핵심] 콜백 함수 등록 (on_change=load_data_callback)
     st.file_uploader(
         "저장된 파일 열기 (JSON)", 
         type=["json"], 
