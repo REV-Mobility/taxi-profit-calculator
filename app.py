@@ -57,13 +57,33 @@ def load_data_callback():
         except Exception as e:
             st.error(f"데이터 파일 읽기 실패: {e}")
 
-# AI 모델 호출 함수 (단일 모델 지정)
-def get_ai_response(api_key, prompt):
+# [핵심] 사용 가능한 AI 모델 자동 탐색 함수
+def find_available_model(api_key):
     genai.configure(api_key=api_key)
-    # 최신 라이브러리에서는 flash 모델이 가장 안정적임
-    model = genai.GenerativeModel('gemini-1.5-flash') 
-    response = model.generate_content(prompt)
-    return response.text
+    try:
+        # 1. 사용 가능한 모델 목록 조회
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # 2. 우선순위 설정 (최신 모델 순)
+        preferred_order = [
+            'models/gemini-1.5-flash', 
+            'models/gemini-1.5-pro', 
+            'models/gemini-1.0-pro', 
+            'models/gemini-pro'
+        ]
+        
+        # 3. 교집합 찾기 (내 키로 쓸 수 있는 것 중 가장 좋은 것)
+        for pref in preferred_order:
+            if pref in models:
+                return pref
+        
+        # 4. 목록에 없으면 아무거나 가능한 것 반환
+        if models:
+            return models[0]
+        return None
+    except Exception as e:
+        st.error(f"모델 목록 조회 실패: {e}")
+        return None
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
@@ -181,6 +201,7 @@ st.markdown("---")
 st.header("3. 상세 검증 및 분석")
 
 if st.session_state.scenarios:
+    # --- 공통 비용 및 단위 계산 ---
     net_rent_cost = rent_cost / 1.1
     per_person_rent = net_rent_cost / total_drivers if total_drivers > 0 else 0
     per_person_admin = admin_salary_total / total_drivers if total_drivers > 0 else 0
@@ -393,13 +414,15 @@ if st.session_state.scenarios:
                 else: return ['background-color: white; color: #2980b9'] * len(row)
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=800)
 
+    # [수정된 AI 탭]
     with tab5:
         st.subheader("🤖 AI 경영 컨설턴트 (Powered by Gemini)")
         st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
         
-        # [NEW] 라이브러리 버전 확인용 디버깅 (필요 시 펼쳐보세요)
-        with st.expander("ℹ️ 라이브러리 버전 확인"):
-            st.write(f"Installed google-generativeai version: {genai.__version__}")
+        # [NEW] 라이브러리 버전 확인용 디버깅 (펼쳐서 버전 확인 가능)
+        with st.expander("ℹ️ AI 라이브러리 버전 확인 (디버깅용)"):
+            st.write(f"현재 설치된 버전: **{genai.__version__}**")
+            st.caption("※ 0.7.0 이상이어야 gemini-1.5 모델을 사용할 수 있습니다.")
             
         api_key = st.text_input("Google API Key를 입력하세요", type="password")
         
@@ -408,23 +431,31 @@ if st.session_state.scenarios:
                 st.error("API Key가 필요합니다.")
             else:
                 try:
-                    response_text = get_ai_response(api_key, f"""
-                    당신은 전문적인 택시 회사 경영 컨설턴트입니다.
-                    아래는 택시 회사의 시나리오별 예상 수익 분석입니다.
-                    [데이터 요약]
-                    {summary_rows}
-                    
-                    다음 내용을 포함한 보고서를 한국어로 작성해주세요:
-                    1. **최고의 시나리오 추천:** 이익이 가장 좋은 안은 무엇인가요?
-                    2. **리스크 분석:** 인건비율이 적정한가요?
-                    3. **전략 제안:** 경영진이 고려해야 할 구체적인 개선점은?
-                    """)
-                    
-                    st.markdown(response_text)
-                    
+                    # 1. 모델 자동 탐색
+                    model_name = find_available_model(api_key)
+                    if not model_name:
+                        st.error("사용 가능한 AI 모델을 찾을 수 없습니다. API Key 권한을 확인하세요.")
+                    else:
+                        st.info(f"✅ 연결 성공! 사용 중인 모델: **{model_name}**")
+                        model = genai.GenerativeModel(model_name)
+                        
+                        # 2. 프롬프트 전송
+                        prompt = f"""
+                        당신은 전문적인 택시 회사 경영 컨설턴트입니다.
+                        아래는 택시 회사의 시나리오별 예상 수익 분석입니다.
+                        [데이터 요약]
+                        {summary_rows}
+                        
+                        다음 내용을 포함한 보고서를 한국어로 작성해주세요:
+                        1. **최고의 시나리오 추천:** 이익이 가장 좋은 안은 무엇인가요?
+                        2. **리스크 분석:** 인건비율이 적정한가요?
+                        3. **전략 제안:** 경영진이 고려해야 할 구체적인 개선점은?
+                        """
+                        with st.spinner("AI가 데이터를 분석 중입니다..."):
+                            response = model.generate_content(prompt)
+                            st.markdown(response.text)
                 except Exception as e:
                     st.error(f"AI 오류: {e}")
-                    st.info("💡 팁: requirements.txt에 'google-generativeai>=0.7.0'이 포함되어 있는지 확인하고 앱을 Reboot 해주세요.")
 
 else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
@@ -436,6 +467,7 @@ with st.sidebar:
     st.markdown("---")
     st.header("📂 데이터 저장 / 불러오기")
     
+    # 콜백 함수 사용 (on_change)
     st.file_uploader(
         "저장된 파일 열기 (JSON)", 
         type=["json"], 
