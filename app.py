@@ -10,32 +10,25 @@ import google.generativeai as genai
 # ---------------------------------------------------------
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
-# [NEW] 디자인 강화를 위한 CSS 주입
+# CSS 디자인 (입력창 강조)
 st.markdown("""
 <style>
-    /* 1. 모든 숫자/텍스트 입력창 디자인 강화 */
     div[data-baseweb="input"] {
-        border: 2px solid #8e94a1 !important;  /* 테두리를 진한 회색으로 변경 */
-        background-color: #f7f9fc !important;   /* 배경을 아주 연한 푸른 회색으로 */
-        border-radius: 5px !important;          /* 모서리를 살짝 둥글게 */
-        box-shadow: 1px 1px 3px rgba(0,0,0,0.1) !important; /* 입체감(그림자) 추가 */
+        border: 2px solid #8e94a1 !important;
+        background-color: #f7f9fc !important;
+        border-radius: 5px !important;
+        box-shadow: 1px 1px 3px rgba(0,0,0,0.1) !important;
     }
-
-    /* 2. 입력창을 클릭했을 때(포커스) 효과 */
     div[data-baseweb="input"]:focus-within {
-        border: 2px solid #d63031 !important;   /* 클릭하면 테두리가 빨간색으로 변경 */
-        background-color: #ffffff !important;   /* 배경은 밝은 흰색으로 */
-        box-shadow: 0 0 5px rgba(214, 48, 49, 0.5) !important; /* 붉은색 광채 효과 */
+        border: 2px solid #d63031 !important;
+        background-color: #ffffff !important;
+        box-shadow: 0 0 5px rgba(214, 48, 49, 0.5) !important;
     }
-
-    /* 3. 입력창 위의 라벨(글자)를 더 진하고 크게 */
     .stNumberInput label, .stTextInput label, .stSelectbox label {
-        font-weight: 700 !important; /* 글자 굵게 */
-        color: #2d3436 !important;   /* 글자색 진한 검정 */
-        font-size: 15px !important;  /* 글자 크기 키움 */
+        font-weight: 700 !important;
+        color: #2d3436 !important;
+        font-size: 15px !important;
     }
-    
-    /* 4. 탭 메뉴 글씨도 잘 보이게 */
     button[data-baseweb="tab"] {
         font-weight: bold !important;
     }
@@ -103,7 +96,7 @@ with st.sidebar:
         rate_sanjae = st.number_input("산재보험 (%)", value=0.65, format="%.2f", key="rate_sanjae") / 100
 
 # ---------------------------------------------------------
-# 2. 시나리오 입력
+# 2. 시나리오 입력 (안전 초기화 방식 적용)
 # ---------------------------------------------------------
 st.header("2. 시나리오 등록")
 
@@ -387,8 +380,9 @@ if st.session_state.scenarios:
                 st.error("API Key가 필요합니다.")
             else:
                 try:
+                    # [수정] 모델명을 gemini-pro에서 gemini-1.5-flash로 변경
                     genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel('gemini-pro')
+                    model = genai.GenerativeModel('gemini-1.5-flash')
                     prompt = f"""
                     당신은 전문적인 택시 회사 경영 컨설턴트입니다.
                     아래는 택시 회사의 시나리오별 예상 수익 분석입니다.
