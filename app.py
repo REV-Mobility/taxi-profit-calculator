@@ -10,7 +10,7 @@ import google.generativeai as genai
 # ---------------------------------------------------------
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
-# CSS: 디자인 및 한글 폰트 최적화
+# CSS: 노란색 하이라이트 디자인 + 파일 업로더 한글화
 st.markdown("""
 <style>
     div[data-baseweb="input"] {
@@ -33,7 +33,6 @@ st.markdown("""
         font-weight: bold !important;
         font-size: 16px !important;
     }
-    /* 파일 업로더 한글화 */
     section[data-testid="stFileUploaderDropzone"] > div > div > small {
         display: none !important;
     }
@@ -69,22 +68,53 @@ def load_data_callback():
         except Exception as e:
             st.error(f"데이터 파일 읽기 실패: {e}")
 
-# [수정] AI 모델 호출 함수 (구형 모델 제거)
-def get_ai_response(api_key, prompt):
+# ---------------------------------------------------------
+# [핵심 수정] 사용 가능한 모델 자동 탐색 및 실행 함수
+# ---------------------------------------------------------
+def generate_analysis(api_key, prompt):
     genai.configure(api_key=api_key)
-    # 최신 모델만 시도 (구형 gemini-pro 제거하여 404 방지)
+    
+    valid_model_name = None
+    
+    # 1. 사용 가능한 모델 목록 조회 시도
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        return response.text
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+        
+        # 2. 우선순위에 따라 모델 선택 (Flash -> Pro -> 1.0 -> Legacy)
+        priority_list = [
+            'models/gemini-1.5-flash',
+            'models/gemini-1.5-pro',
+            'models/gemini-1.0-pro',
+            'models/gemini-pro'
+        ]
+        
+        for p_model in priority_list:
+            if p_model in available_models:
+                valid_model_name = p_model
+                break
+        
+        # 목록에 없지만 리스트가 비어있지 않다면 첫 번째 것 선택
+        if not valid_model_name and available_models:
+            valid_model_name = available_models[0]
+            
     except Exception as e:
-        # 1.5-flash 실패 시 1.5-pro 시도
-        try:
-            model = genai.GenerativeModel('gemini-1.5-pro')
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as e2:
-            raise e # 최신 모델 둘 다 안 되면 에러 발생 (라이브러리 버전 문제임)
+        # list_models가 막힌 경우, 가장 안전한 legacy 모델 강제 시도
+        valid_model_name = 'gemini-pro'
+
+    if not valid_model_name:
+        return "사용 가능한 AI 모델을 찾을 수 없습니다. API Key 권한을 확인해주세요.", "Unknown"
+
+    # 3. 선택된 모델로 콘텐츠 생성
+    try:
+        model = genai.GenerativeModel(valid_model_name)
+        response = model.generate_content(prompt)
+        return response.text, valid_model_name
+    except Exception as e:
+        return f"AI 호출 오류 발생 ({valid_model_name}): {str(e)}", valid_model_name
+
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
@@ -449,7 +479,6 @@ if st.session_state.scenarios:
         
         with st.expander("ℹ️ AI 라이브러리 버전 확인"):
             st.write(f"현재 설치된 버전: **{genai.__version__}**")
-            st.caption("※ 0.7.0 이상 버전이 필요합니다.")
             
         api_key = st.text_input("Google API Key를 입력하세요", type="password")
         
@@ -507,9 +536,12 @@ if st.session_state.scenarios:
                     톤앤매너: 전문적이고 냉철하게, 하지만 경영자를 설득하는 부드러운 어조로 한국어로 작성해 주세요.
                     """
                     
-                    with st.spinner("AI가 데이터를 분석 중입니다..."):
-                        response_text = get_ai_response(api_key, prompt)
-                        st.markdown(response_text)
+                    with st.spinner("AI가 데이터를 분석 중입니다... (모델 탐색 중)"):
+                        # [핵심] 자동 모델 탐색 함수 호출
+                        response_text, model_name = generate_analysis(api_key, prompt)
+                    
+                    st.success(f"✅ 심층 분석 완료! (모델: {model_name})")
+                    st.markdown(response_text)
                     
                 except Exception as e:
                     st.error(f"AI 오류: {e}")
