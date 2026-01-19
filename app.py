@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import json
+import google.generativeai as genai
 
 # ---------------------------------------------------------
 # 설정 및 유틸리티
@@ -10,10 +11,8 @@ import json
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
 def currency_input(label, value, step=10000, key=None):
-    # Session State에 값이 있으면 그것을 우선 사용 (불러오기 기능 호환)
     if key and key in st.session_state:
         value = st.session_state[key]
-        
     val = st.number_input(label, value=value, step=step, format="%d", key=key)
     if val > 0:
         st.caption(f"👉 {int(val):,} 원") 
@@ -23,69 +22,7 @@ st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 0. 데이터 저장/불러오기 (사이드바 최상단)
-# ---------------------------------------------------------
-with st.sidebar:
-    st.header("📂 데이터 저장 / 불러오기")
-    st.info("입력한 모든 값을 파일로 저장해두고, 나중에 다시 불러올 수 있습니다.")
-    
-    # 1. 불러오기 (Upload)
-    uploaded_file = st.file_uploader("이전에 저장한 파일 열기 (JSON)", type=["json"])
-    if uploaded_file is not None:
-        try:
-            data = json.load(uploaded_file)
-            
-            # 1. 기초 환경 데이터 복원
-            for key, value in data['basic_info'].items():
-                st.session_state[key] = value
-                
-            # 2. 시나리오 데이터 복원
-            st.session_state.scenarios = data['scenarios']
-            
-            st.success("✅ 데이터 복구 완료! (잠시 후 새로고침 됩니다)")
-            # 파일 로드 후 즉시 반영을 위해 리런
-            if st.button("복구된 데이터 적용하기"):
-                st.rerun()
-                
-        except Exception as e:
-            st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
-
-    # 2. 저장하기 (Download)
-    # 현재 Session State의 값들을 모아서 JSON 생성
-    def get_current_data():
-        # 사이드바 위젯의 키값들
-        keys_to_save = [
-            'n_day', 'n_night', 'n_shift', 'n_daily', 'n_cars',
-            'car_price', 'car_dep_years', 'car_maint', 'insurance_year',
-            'rent_cost', 'admin_salary_total',
-            'full_days', 'lpg_price',
-            'fuel_day', 'fuel_night', 'fuel_shift', 'fuel_daily',
-            'rate_pension', 'rate_health', 'rate_care_ratio', 
-            'rate_emp_unemp', 'rate_emp_stabil', 'rate_sanjae'
-        ]
-        
-        basic_info = {}
-        for k in keys_to_save:
-            if k in st.session_state:
-                basic_info[k] = st.session_state[k]
-        
-        return json.dumps({
-            "basic_info": basic_info,
-            "scenarios": st.session_state.get('scenarios', [])
-        }, indent=4, ensure_ascii=False)
-
-    if st.download_button(
-        label="💾 현재 작업 내용 PC에 저장하기",
-        data=get_current_data(),
-        file_name="taxi_profit_data.json",
-        mime="application/json"
-    ):
-        st.success("저장되었습니다! 다운로드 폴더를 확인하세요.")
-
-    st.markdown("---")
-
-# ---------------------------------------------------------
-# 1. 사이드바: 회사 기초 환경 설정 (Key 추가됨)
+# 1. 사이드바: 회사 기초 환경 설정 (상단 배치)
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("1. 회사 기초 환경 설정")
@@ -143,9 +80,9 @@ if 'scenarios' not in st.session_state:
 
 with st.form("scenario_form"):
     c_name, c_wage, c_time = st.columns([2, 1, 1])
-    s_name = c_name.text_input("시나리오 이름", "")
-    s_hourly = c_wage.number_input("통상 시급(원)", value=0, format="%d")
-    s_work_time = c_time.number_input("1일 소정근로(시간)", value=0.0, step=0.1, format="%.2f")
+    s_name = c_name.text_input("시나리오 이름", "", key="reg_name")
+    s_hourly = c_wage.number_input("통상 시급(원)", value=0, format="%d", key="reg_hourly")
+    s_work_time = c_time.number_input("1일 소정근로(시간)", value=0.0, step=0.1, format="%.2f", key="reg_time")
 
     st.markdown("---")
     h1, h2, h3, h4 = st.columns([1, 2, 2, 2])
@@ -154,18 +91,18 @@ with st.form("scenario_form"):
     h3.markdown("**비과세 금액(예. 야간수당)**")
     h4.markdown("**🔴 1일 사납금**")
 
-    def input_row(label):
+    def input_row(label, key_prefix):
         c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
         c1.markdown(f"###### {label}")
-        pay = c2.number_input(f"{label}총액", value=0, step=10000, label_visibility="collapsed")
-        tf = c3.number_input(f"{label}비과세", value=0, step=10000, label_visibility="collapsed")
-        sanap = c4.number_input(f"{label}사납금", value=0, step=1000, label_visibility="collapsed")
+        pay = c2.number_input(f"{label}총액", value=0, step=10000, label_visibility="collapsed", key=f"reg_pay_{key_prefix}")
+        tf = c3.number_input(f"{label}비과세", value=0, step=10000, label_visibility="collapsed", key=f"reg_tf_{key_prefix}")
+        sanap = c4.number_input(f"{label}사납금", value=0, step=1000, label_visibility="collapsed", key=f"reg_sanap_{key_prefix}")
         return pay, tf, sanap
 
-    sal_day, tf_day, sanap_day = input_row("주간")
-    sal_night, tf_night, sanap_night = input_row("야간")
-    sal_shift, tf_shift, sanap_shift = input_row("교대")
-    sal_daily, tf_daily, sanap_daily = input_row("일차")
+    sal_day, tf_day, sanap_day = input_row("주간", "day")
+    sal_night, tf_night, sanap_night = input_row("야간", "night")
+    sal_shift, tf_shift, sanap_shift = input_row("교대", "shift")
+    sal_daily, tf_daily, sanap_daily = input_row("일차", "daily")
 
     if st.form_submit_button("💾 시나리오 추가"):
         if s_name == "":
@@ -180,7 +117,17 @@ with st.form("scenario_form"):
                 "shift": {"pay": sal_shift, "tf": tf_shift, "sanap": sanap_shift},
                 "daily": {"pay": sal_daily, "tf": tf_daily, "sanap": sanap_daily},
             })
-            st.success(f"[{s_name}] 추가됨")
+            st.success(f"[{s_name}] 추가되었습니다.")
+            
+            # 입력값 초기화 (Reset)
+            st.session_state["reg_name"] = ""
+            st.session_state["reg_hourly"] = 0
+            st.session_state["reg_time"] = 0.0
+            for k in ["day", "night", "shift", "daily"]:
+                st.session_state[f"reg_pay_{k}"] = 0
+                st.session_state[f"reg_tf_{k}"] = 0
+                st.session_state[f"reg_sanap_{k}"] = 0
+            st.rerun()
 
 # ---------------------------------------------------------
 # 3. 계산 및 결과 출력
@@ -199,13 +146,11 @@ if st.session_state.scenarios:
         ratio = 1.0 if driver_type == 'single' else 0.5
         net_car_price = car_price / 1.1
         net_car_maint = car_maint / 1.1
-        
         c_dep = (net_car_price / car_dep_years / 12) * ratio if car_dep_years > 0 else 0
         c_ins = (insurance_year / 12) * ratio 
         c_maint = net_car_maint * ratio
         return c_dep, c_ins, c_maint
 
-    # --- 계산 함수 ---
     def calculate_scenario(sc_data, override_sanap=None):
         hourly_wage = sc_data['hourly']
         work_time_sc = sc_data['work_time']
@@ -274,34 +219,27 @@ if st.session_state.scenarios:
             
             rows = []
             rows.append(("1. 월 매출(사납금)", monthly_sanap, f"{sanap:,}원 × {full_days}일"))
-            
             rows.append(("▼ 매출 공제(세금/수수료)", -(vat_out + card_fee), ""))
             rows.append(("   └ 부가세(매출세액)", -vat_out, "사납금의 10/110"))
             rows.append(("   └ 카드수수료", -card_fee, "사납금의 1.5%"))
-            
             rows.append(("▼ 연료비(Net)", -net_fuel_cost, "부가세 제외 공급가 기준"))
-            
             rows.append(("▼ 차량 고정비 합계", -total_car_fixed, "감가+보험+유지"))
             rows.append(("   └ 감가상각비", -c_dep, ""))
             rows.append(("   └ 보험료", -c_ins, ""))
             rows.append(("   └ 유지비", -c_maint, ""))
-            
             rows.append(("▼ 인건비 합계", -total_labor_cost, f"매출 대비 {labor_ratio:.1f}%"))
             rows.append(("   └ 급여 지급액(Gross)", -total_pay, "입력된 총액"))
             rows.append(("   └ 퇴직금 적립액", -severance, "급여총액 ÷ 12"))
             rows.append(("   └ 연차수당", -annual_leave, f"{hourly_wage:,}원×{work_time_sc}h×1.25"))
-            
             rows.append(("   ▼ [상세] 4대보험 계", -total_4ins, ""))
             rows.append(("      - 국민연금", -ins_pension, f"{rate_pension*100:.2f}%"))
             rows.append(("      - 건강보험", -ins_health, f"{rate_health*100:.3f}%"))
             rows.append(("      - 장기요양", -ins_care, f"건보료의 {rate_care_ratio*100:.2f}%"))
             rows.append(("      - 고용보험", -ins_emp, f"{(rate_emp_unemp+rate_emp_stabil)*100:.2f}%"))
             rows.append(("      - 산재보험", -ins_sanjae, f"{rate_sanjae*100:.2f}%"))
-            
             rows.append(("▼ 공통 운영비 합계", -cost_overhead, ""))
             rows.append(("   └ 차고지 임대료", -per_person_rent, ""))
             rows.append(("   └ 관리직원 급여", -per_person_admin, ""))
-            
             rows.append(("■ 최종 영업이익", profit_person, "매출 - 비용합계"))
             debug_rows[f"{sc_data['name']} - {t_name}"] = rows
 
@@ -325,8 +263,10 @@ if st.session_state.scenarios:
     for res in all_results_data:
         global_debug.update(res['debug'])
 
-    # --- 탭 구성 ---
-    tab1, tab2, tab3, tab4 = st.tabs(["🎛️ 사납금 조정 시뮬레이션", "🏆 시나리오 총괄 비교", "📊 근무형태별 분석", "🧾 상세 계산 검증"])
+    # --- 탭 구성 (AI 추가됨) ---
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🎛️ 사납금 조정", "🏆 시나리오 비교", "📊 근무형태별 분석", "🧾 상세 계산 검증", "🤖 AI 경영 컨설팅"
+    ])
 
     # [Tab 1] 사납금 조정
     with tab1:
@@ -339,7 +279,6 @@ if st.session_state.scenarios:
         
         st.write(f"▼ **'{selected_sc_name}'의 1일 사납금을 조정해 보세요.**")
         ac1, ac2, ac3, ac4 = st.columns(4)
-        
         new_day = ac1.number_input("주간 사납금", value=origin_sc['day']['sanap'], step=1000, key=f"sim_day_{selected_sc_idx}")
         new_night = ac2.number_input("야간 사납금", value=origin_sc['night']['sanap'], step=1000, key=f"sim_night_{selected_sc_idx}")
         new_shift = ac3.number_input("교대 사납금", value=origin_sc['shift']['sanap'], step=1000, key=f"sim_shift_{selected_sc_idx}")
@@ -349,7 +288,7 @@ if st.session_state.scenarios:
         sim_result = calculate_scenario(origin_sc, override_map)
         origin_result = all_results_data[selected_sc_idx]
         
-        st.markdown("##### 📊 시뮬레이션 결과 (변경 전 vs 변경 후)")
+        st.markdown("##### 📊 시뮬레이션 결과")
         mc1, mc2, mc3, mc4 = st.columns(4)
         mc1.metric("월 총 매출", f"{sim_result['revenue']:,.0f} 원", f"{sim_result['revenue'] - origin_result['revenue']:,.0f} 원")
         mc2.metric("월 영업이익", f"{sim_result['profit']:,.0f} 원", f"{sim_result['profit'] - origin_result['profit']:,.0f} 원")
@@ -362,7 +301,7 @@ if st.session_state.scenarios:
             st.session_state.scenarios[selected_sc_idx]['night']['sanap'] = new_night
             st.session_state.scenarios[selected_sc_idx]['shift']['sanap'] = new_shift
             st.session_state.scenarios[selected_sc_idx]['daily']['sanap'] = new_daily
-            st.success("✅ 업데이트 완료! 다른 탭에서 변경된 결과를 확인하세요.")
+            st.success("✅ 업데이트 완료!")
             st.rerun()
 
     # [Tab 2] 총괄 비교
@@ -414,5 +353,92 @@ if st.session_state.scenarios:
                 elif row["금액(원)"] < 0: return ['background-color: white; color: #c0392b'] * len(row)
                 else: return ['background-color: white; color: #2980b9'] * len(row)
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=800)
+
+    # [Tab 5] AI 경영 컨설팅 (New)
+    with tab5:
+        st.subheader("🤖 AI 경영 컨설턴트 (Powered by Gemini)")
+        st.markdown("""
+        입력된 시나리오 데이터를 분석하여 **가장 이익이 높은 시나리오 추천**, **리스크 요인 분석**, **수익 개선 전략**을 제안합니다.
+        """)
+        
+        api_key = st.text_input("Google API Key를 입력하세요", type="password")
+        
+        if st.button("AI 분석 요청하기"):
+            if not api_key:
+                st.error("API Key가 필요합니다.")
+            else:
+                try:
+                    genai.configure(api_key=api_key)
+                    model = genai.GenerativeModel('gemini-pro')
+                    
+                    # 프롬프트 생성
+                    prompt = f"""
+                    당신은 전문적인 택시 회사 경영 컨설턴트입니다.
+                    아래는 한 택시 회사의 여러 급여/사납금 시나리오에 따른 예상 수익 분석 결과입니다.
+                    
+                    [데이터 요약]
+                    {summary_rows}
+                    
+                    이 데이터를 바탕으로 다음 내용을 포함한 보고서를 작성해 주세요:
+                    1. **최고의 시나리오 추천:** 영업이익과 이익률이 가장 좋은 안은 무엇인가요?
+                    2. **리스크 분석:** 인건비율이 과도하게 높은 시나리오가 있나요? (통상 60~70% 기준)
+                    3. **전략 제안:** 수익성을 더 높이기 위해 경영진이 고려해야 할 점은 무엇인가요? (예: 사납금 조정, 차량 가동률 등)
+                    
+                    한국어로 정중하고 전문적인 톤으로 답변해 주세요.
+                    """
+                    
+                    with st.spinner("AI가 데이터를 분석 중입니다..."):
+                        response = model.generate_content(prompt)
+                        st.markdown(response.text)
+                        
+                except Exception as e:
+                    st.error(f"AI 분석 중 오류가 발생했습니다: {e}")
+
 else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
+
+# ---------------------------------------------------------
+# [하단 이동] 데이터 저장/불러오기
+# ---------------------------------------------------------
+with st.sidebar:
+    st.markdown("---")
+    st.header("📂 데이터 저장 / 불러오기")
+    
+    uploaded_file = st.file_uploader("저장된 파일 열기 (JSON)", type=["json"], key="bottom_uploader")
+    if uploaded_file is not None:
+        try:
+            data = json.load(uploaded_file)
+            for key, value in data['basic_info'].items():
+                st.session_state[key] = value
+            st.session_state.scenarios = data['scenarios']
+            if st.button("데이터 복구 적용"):
+                st.rerun()
+        except Exception as e:
+            st.error(f"오류: {e}")
+
+    def get_current_data():
+        keys_to_save = [
+            'n_day', 'n_night', 'n_shift', 'n_daily', 'n_cars',
+            'car_price', 'car_dep_years', 'car_maint', 'insurance_year',
+            'rent_cost', 'admin_salary_total',
+            'full_days', 'lpg_price',
+            'fuel_day', 'fuel_night', 'fuel_shift', 'fuel_daily',
+            'rate_pension', 'rate_health', 'rate_care_ratio', 
+            'rate_emp_unemp', 'rate_emp_stabil', 'rate_sanjae'
+        ]
+        basic_info = {}
+        for k in keys_to_save:
+            if k in st.session_state:
+                basic_info[k] = st.session_state[k]
+        
+        return json.dumps({
+            "basic_info": basic_info,
+            "scenarios": st.session_state.get('scenarios', [])
+        }, indent=4, ensure_ascii=False)
+
+    st.download_button(
+        label="💾 작업 내용 PC 저장",
+        data=get_current_data(),
+        file_name="taxi_profit_data.json",
+        mime="application/json"
+    )
