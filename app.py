@@ -10,6 +10,38 @@ import google.generativeai as genai
 # ---------------------------------------------------------
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
+# [NEW] 디자인 강화를 위한 CSS 주입
+st.markdown("""
+<style>
+    /* 1. 모든 숫자/텍스트 입력창 디자인 강화 */
+    div[data-baseweb="input"] {
+        border: 2px solid #8e94a1 !important;  /* 테두리를 진한 회색으로 변경 */
+        background-color: #f7f9fc !important;   /* 배경을 아주 연한 푸른 회색으로 */
+        border-radius: 5px !important;          /* 모서리를 살짝 둥글게 */
+        box-shadow: 1px 1px 3px rgba(0,0,0,0.1) !important; /* 입체감(그림자) 추가 */
+    }
+
+    /* 2. 입력창을 클릭했을 때(포커스) 효과 */
+    div[data-baseweb="input"]:focus-within {
+        border: 2px solid #d63031 !important;   /* 클릭하면 테두리가 빨간색으로 변경 */
+        background-color: #ffffff !important;   /* 배경은 밝은 흰색으로 */
+        box-shadow: 0 0 5px rgba(214, 48, 49, 0.5) !important; /* 붉은색 광채 효과 */
+    }
+
+    /* 3. 입력창 위의 라벨(글자)를 더 진하고 크게 */
+    .stNumberInput label, .stTextInput label, .stSelectbox label {
+        font-weight: 700 !important; /* 글자 굵게 */
+        color: #2d3436 !important;   /* 글자색 진한 검정 */
+        font-size: 15px !important;  /* 글자 크기 키움 */
+    }
+    
+    /* 4. 탭 메뉴 글씨도 잘 보이게 */
+    button[data-baseweb="tab"] {
+        font-weight: bold !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 def currency_input(label, value, step=10000, key=None):
     if key and key in st.session_state:
         value = st.session_state[key]
@@ -71,20 +103,18 @@ with st.sidebar:
         rate_sanjae = st.number_input("산재보험 (%)", value=0.65, format="%.2f", key="rate_sanjae") / 100
 
 # ---------------------------------------------------------
-# 2. 시나리오 입력 (안전 초기화 방식 적용)
+# 2. 시나리오 입력
 # ---------------------------------------------------------
 st.header("2. 시나리오 등록")
 
 if 'scenarios' not in st.session_state:
     st.session_state.scenarios = []
 
-# [핵심] 폼 초기화를 위한 ID 관리
 if 'form_id' not in st.session_state:
     st.session_state.form_id = 0
 
 with st.form("scenario_form"):
     c_name, c_wage, c_time = st.columns([2, 1, 1])
-    # Key에 form_id를 붙여서, 저장 시 id를 바꾸면 입력창이 새것으로 교체됨
     s_name = c_name.text_input("시나리오 이름", "", key=f"reg_name_{st.session_state.form_id}")
     s_hourly = c_wage.number_input("통상 시급(원)", value=0, format="%d", key=f"reg_hourly_{st.session_state.form_id}")
     s_work_time = c_time.number_input("1일 소정근로(시간)", value=0.0, step=0.1, format="%.2f", key=f"reg_time_{st.session_state.form_id}")
@@ -99,7 +129,6 @@ with st.form("scenario_form"):
     def input_row(label, key_prefix):
         c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
         c1.markdown(f"###### {label}")
-        # Key Pattern: reg_pay_day_0, reg_pay_day_1 ...
         fid = st.session_state.form_id
         pay = c2.number_input(f"{label}총액", value=0, step=10000, label_visibility="collapsed", key=f"reg_pay_{key_prefix}_{fid}")
         tf = c3.number_input(f"{label}비과세", value=0, step=10000, label_visibility="collapsed", key=f"reg_tf_{key_prefix}_{fid}")
@@ -115,7 +144,6 @@ with st.form("scenario_form"):
         if s_name == "":
             st.error("시나리오 이름을 입력해주세요.")
         else:
-            # 1. 데이터 저장
             st.session_state.scenarios.append({
                 "name": s_name, 
                 "hourly": s_hourly,
@@ -126,8 +154,6 @@ with st.form("scenario_form"):
                 "daily": {"pay": sal_daily, "tf": tf_daily, "sanap": sanap_daily},
             })
             st.success(f"[{s_name}] 추가되었습니다.")
-            
-            # 2. [오류 해결] 폼 ID를 증가시켜서 다음 렌더링 때 '새로운 입력창'을 불러오게 함
             st.session_state.form_id += 1
             st.rerun()
 
@@ -279,7 +305,6 @@ if st.session_state.scenarios:
         st.write(f"▼ **'{selected_sc_name}'의 1일 사납금을 조정해 보세요.**")
         ac1, ac2, ac3, ac4 = st.columns(4)
         
-        # 키값 동적 할당
         new_day = ac1.number_input("주간 사납금", value=origin_sc['day']['sanap'], step=1000, key=f"sim_day_{selected_sc_idx}")
         new_night = ac2.number_input("야간 사납금", value=origin_sc['night']['sanap'], step=1000, key=f"sim_night_{selected_sc_idx}")
         new_shift = ac3.number_input("교대 사납금", value=origin_sc['shift']['sanap'], step=1000, key=f"sim_shift_{selected_sc_idx}")
