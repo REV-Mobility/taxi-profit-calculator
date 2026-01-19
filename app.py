@@ -10,32 +10,25 @@ import google.generativeai as genai
 # ---------------------------------------------------------
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
-# [디자인 수정] 테두리 대신 노란색 배경 하이라이트 적용
+# CSS: 노란색 하이라이트 디자인 (가독성 강화)
 st.markdown("""
 <style>
-    /* 1. 입력창 배경을 '노란색'으로 변경 (포스트잇 느낌) */
     div[data-baseweb="input"] {
-        background-color: #ffffd0 !important;   /* 연한 노란색 */
-        border: 1px solid #dcdcdc !important;   /* 테두리는 아주 얇고 연하게 */
-        border-radius: 4px !important;          /* 모서리 둥글게 */
+        background-color: #ffffd0 !important;
+        border: 1px solid #dcdcdc !important;
+        border-radius: 4px !important;
         color: black !important;
     }
-
-    /* 2. 입력창 클릭(포커스) 시: 더 진한 노란색으로 강조 */
     div[data-baseweb="input"]:focus-within {
-        background-color: #fff9c4 !important;   /* 진한 노란색 배경 */
-        border: 2px solid #fbc02d !important;   /* 테두리도 진한 노란색 */
-        box-shadow: 0 0 5px rgba(251, 192, 45, 0.5) !important; /* 노란색 광채 */
+        background-color: #fff9c4 !important;
+        border: 2px solid #fbc02d !important;
+        box-shadow: 0 0 5px rgba(251, 192, 45, 0.5) !important;
     }
-
-    /* 3. 라벨(항목 이름) 글자 강조 */
     .stNumberInput label, .stTextInput label, .stSelectbox label {
-        font-weight: 800 !important; /* 글자 매우 굵게 */
-        color: #2d3436 !important;   /* 진한 검정색 */
+        font-weight: 800 !important;
+        color: #2d3436 !important;
         font-size: 15px !important;
     }
-
-    /* 4. 탭 메뉴 글씨 강조 */
     button[data-baseweb="tab"] {
         font-weight: bold !important;
         font-size: 16px !important;
@@ -44,12 +37,35 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def currency_input(label, value, step=10000, key=None):
+    # Session State 값이 있으면 우선 사용
     if key and key in st.session_state:
         value = st.session_state[key]
     val = st.number_input(label, value=value, step=step, format="%d", key=key)
     if val > 0:
         st.caption(f"👉 {int(val):,} 원") 
     return val
+
+# ---------------------------------------------------------
+# [핵심 수정] 데이터 로드 콜백 함수
+# (이 함수는 화면이 그려지기 '직전'에 실행되어 오류를 막습니다)
+# ---------------------------------------------------------
+def load_data_callback():
+    # 업로더 키('loader_widget')를 통해 파일 접근
+    uploaded_file = st.session_state.loader_widget
+    if uploaded_file is not None:
+        try:
+            data = json.load(uploaded_file)
+            
+            # 1. 기초 환경 변수 업데이트
+            for key, value in data['basic_info'].items():
+                st.session_state[key] = value
+                
+            # 2. 시나리오 업데이트
+            st.session_state.scenarios = data['scenarios']
+            
+            st.toast("✅ 데이터가 성공적으로 복구되었습니다!", icon="📂")
+        except Exception as e:
+            st.error(f"데이터 파일 읽기 실패: {e}")
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
@@ -105,7 +121,7 @@ with st.sidebar:
         rate_sanjae = st.number_input("산재보험 (%)", value=0.65, format="%.2f", key="rate_sanjae") / 100
 
 # ---------------------------------------------------------
-# 2. 시나리오 입력 (초기화 기능 포함)
+# 2. 시나리오 입력
 # ---------------------------------------------------------
 st.header("2. 시나리오 등록")
 
@@ -299,7 +315,6 @@ if st.session_state.scenarios:
 
     with tab1:
         st.subheader("🎛️ 사납금 조정 시뮬레이터 (What-If)")
-        st.write("👇 **노란색 박스**의 값을 수정하여 시뮬레이션 하세요.")
         sc_names = [sc['name'] for sc in st.session_state.scenarios]
         selected_sc_name = st.selectbox("조정할 시나리오 선택", sc_names)
         
@@ -392,7 +407,6 @@ if st.session_state.scenarios:
             else:
                 try:
                     genai.configure(api_key=api_key)
-                    # 모델명 gemini-1.5-flash로 고정
                     model = genai.GenerativeModel('gemini-1.5-flash')
                     prompt = f"""
                     당신은 전문적인 택시 회사 경영 컨설턴트입니다.
@@ -415,23 +429,19 @@ else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
 
 # ---------------------------------------------------------
-# [하단 이동] 데이터 저장/불러오기
+# [하단] 데이터 저장/불러오기 (UI는 하단, 로직은 상단 콜백에서 처리)
 # ---------------------------------------------------------
 with st.sidebar:
     st.markdown("---")
     st.header("📂 데이터 저장 / 불러오기")
     
-    uploaded_file = st.file_uploader("저장된 파일 열기 (JSON)", type=["json"], key="bottom_uploader")
-    if uploaded_file is not None:
-        try:
-            data = json.load(uploaded_file)
-            for key, value in data['basic_info'].items():
-                st.session_state[key] = value
-            st.session_state.scenarios = data['scenarios']
-            if st.button("데이터 복구 적용"):
-                st.rerun()
-        except Exception as e:
-            st.error(f"오류: {e}")
+    # [수정] 콜백 함수 등록 (on_change=load_data_callback)
+    st.file_uploader(
+        "저장된 파일 열기 (JSON)", 
+        type=["json"], 
+        key="loader_widget", 
+        on_change=load_data_callback
+    )
 
     def get_current_data():
         keys_to_save = [
