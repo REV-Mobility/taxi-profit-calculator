@@ -10,27 +10,35 @@ import google.generativeai as genai
 # ---------------------------------------------------------
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
-# CSS 디자인 (입력창 강조)
+# [디자인 수정] 테두리 대신 노란색 배경 하이라이트 적용
 st.markdown("""
 <style>
+    /* 1. 입력창 배경을 '노란색'으로 변경 (포스트잇 느낌) */
     div[data-baseweb="input"] {
-        border: 2px solid #8e94a1 !important;
-        background-color: #f7f9fc !important;
-        border-radius: 5px !important;
-        box-shadow: 1px 1px 3px rgba(0,0,0,0.1) !important;
+        background-color: #ffffd0 !important;   /* 연한 노란색 */
+        border: 1px solid #dcdcdc !important;   /* 테두리는 아주 얇고 연하게 */
+        border-radius: 4px !important;          /* 모서리 둥글게 */
+        color: black !important;
     }
+
+    /* 2. 입력창 클릭(포커스) 시: 더 진한 노란색으로 강조 */
     div[data-baseweb="input"]:focus-within {
-        border: 2px solid #d63031 !important;
-        background-color: #ffffff !important;
-        box-shadow: 0 0 5px rgba(214, 48, 49, 0.5) !important;
+        background-color: #fff9c4 !important;   /* 진한 노란색 배경 */
+        border: 2px solid #fbc02d !important;   /* 테두리도 진한 노란색 */
+        box-shadow: 0 0 5px rgba(251, 192, 45, 0.5) !important; /* 노란색 광채 */
     }
+
+    /* 3. 라벨(항목 이름) 글자 강조 */
     .stNumberInput label, .stTextInput label, .stSelectbox label {
-        font-weight: 700 !important;
-        color: #2d3436 !important;
+        font-weight: 800 !important; /* 글자 매우 굵게 */
+        color: #2d3436 !important;   /* 진한 검정색 */
         font-size: 15px !important;
     }
+
+    /* 4. 탭 메뉴 글씨 강조 */
     button[data-baseweb="tab"] {
         font-weight: bold !important;
+        font-size: 16px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -51,6 +59,7 @@ st.markdown("---")
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("1. 회사 기초 환경 설정")
+    st.markdown("👇 **노란색 칸**에 회사 데이터를 입력하세요.")
     
     with st.expander("① 인력 및 차량 구성", expanded=True):
         col1, col2 = st.columns(2)
@@ -96,7 +105,7 @@ with st.sidebar:
         rate_sanjae = st.number_input("산재보험 (%)", value=0.65, format="%.2f", key="rate_sanjae") / 100
 
 # ---------------------------------------------------------
-# 2. 시나리오 입력 (안전 초기화 방식 적용)
+# 2. 시나리오 입력 (초기화 기능 포함)
 # ---------------------------------------------------------
 st.header("2. 시나리오 등록")
 
@@ -107,6 +116,7 @@ if 'form_id' not in st.session_state:
     st.session_state.form_id = 0
 
 with st.form("scenario_form"):
+    st.write("👇 **아래 노란색 칸에 시나리오 정보를 입력하세요.**")
     c_name, c_wage, c_time = st.columns([2, 1, 1])
     s_name = c_name.text_input("시나리오 이름", "", key=f"reg_name_{st.session_state.form_id}")
     s_hourly = c_wage.number_input("통상 시급(원)", value=0, format="%d", key=f"reg_hourly_{st.session_state.form_id}")
@@ -289,6 +299,7 @@ if st.session_state.scenarios:
 
     with tab1:
         st.subheader("🎛️ 사납금 조정 시뮬레이터 (What-If)")
+        st.write("👇 **노란색 박스**의 값을 수정하여 시뮬레이션 하세요.")
         sc_names = [sc['name'] for sc in st.session_state.scenarios]
         selected_sc_name = st.selectbox("조정할 시나리오 선택", sc_names)
         
@@ -380,8 +391,8 @@ if st.session_state.scenarios:
                 st.error("API Key가 필요합니다.")
             else:
                 try:
-                    # [수정] 모델명을 gemini-pro에서 gemini-1.5-flash로 변경
                     genai.configure(api_key=api_key)
+                    # 모델명 gemini-1.5-flash로 고정
                     model = genai.GenerativeModel('gemini-1.5-flash')
                     prompt = f"""
                     당신은 전문적인 택시 회사 경영 컨설턴트입니다.
