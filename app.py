@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import json
 import google.generativeai as genai
 from datetime import datetime
+import io # 엑셀 다운로드를 위해 필요
 
 # ---------------------------------------------------------
 # 설정 및 유틸리티
@@ -276,13 +277,11 @@ if st.session_state.scenarios:
             if taxable_pay < 0: taxable_pay = 0
             severance = total_pay / 12 
             annual_leave = hourly_wage * work_time_sc * 1.25
-            
             ins_pension = taxable_pay * rate_pension
             ins_health = taxable_pay * rate_health
             ins_care = ins_health * rate_care_ratio
             ins_emp = taxable_pay * (rate_emp_unemp + rate_emp_stabil)
             ins_sanjae = total_pay * rate_sanjae
-            
             total_4ins = ins_pension + ins_health + ins_care + ins_emp + ins_sanjae
             total_labor_cost = total_pay + severance + annual_leave + total_4ins
             
@@ -303,21 +302,16 @@ if st.session_state.scenarios:
                 "인건비율": labor_ratio
             })
             
-            # [복구된 상세 내역]
             rows = []
             rows.append(("1. 월 매출(사납금)", monthly_sanap, f"{sanap:,}원 × {full_days}일"))
-            
             rows.append(("▼ 매출 공제(세금/수수료)", -(vat_out + card_fee), ""))
             rows.append(("   └ 부가세(매출세액)", -vat_out, "사납금의 10/110"))
             rows.append(("   └ 카드수수료", -card_fee, "사납금의 1.5%"))
-            
             rows.append(("▼ 연료비(Net)", -net_fuel_cost, "부가세 제외 공급가 기준"))
-            
             rows.append(("▼ 차량 고정비 합계", -total_car_fixed, "감가+보험+유지"))
             rows.append(("   └ 감가상각비", -c_dep, ""))
             rows.append(("   └ 보험료", -c_ins, ""))
             rows.append(("   └ 유지비", -c_maint, ""))
-            
             rows.append(("▼ 인건비 합계", -total_labor_cost, f"매출 대비 {labor_ratio:.1f}%"))
             rows.append(("   └ 급여 지급액(Gross)", -total_pay, "입력된 총액"))
             rows.append(("   └ 퇴직금 적립액", -severance, "급여총액 ÷ 12"))
@@ -328,13 +322,11 @@ if st.session_state.scenarios:
             rows.append(("      - 장기요양", -ins_care, f"건보료의 {rate_care_ratio*100:.2f}%"))
             rows.append(("      - 고용보험", -ins_emp, f"{(rate_emp_unemp+rate_emp_stabil)*100:.2f}%"))
             rows.append(("      - 산재보험", -ins_sanjae, f"{rate_sanjae*100:.2f}%"))
-            
             rows.append(("▼ 공통 운영비 합계", -cost_overhead, ""))
             rows.append(("   └ 차고지 임대료", -(net_rent_cost/total_drivers), ""))
             rows.append(("   └ 관리직원 급여", -(net_admin_salary/total_drivers), ""))
             if total_leakage_cost > 0:
                 rows.append(("   └ ⚠️ 차량 유휴비용", -(total_leakage_cost/total_drivers), f"총 {int(total_leakage_cost):,}원 배분"))
-            
             rows.append(("■ 최종 영업이익", profit_person, "매출 - 비용합계"))
             debug_rows[f"{sc_data['name']} - {t_name}"] = rows
 
@@ -401,13 +393,27 @@ if st.session_state.scenarios:
                 "이익률": res['margin']
             })
         df_summary = pd.DataFrame(summary_rows)
-        st.dataframe(df_summary.style.format({
+        
+        # [NEW] 엑셀 다운로드 버튼 추가
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_summary.to_excel(writer, index=False, sheet_name='Summary')
+        
+        c1, c2 = st.columns([4, 1])
+        c1.dataframe(df_summary.style.format({
                 "총 매출 (월)": "{:,.0f}", 
                 "총 인건비 (월)": "{:,.0f}", 
                 "영업이익 (월)": "{:,.0f}", 
                 "인건비율": "{:.1f}%", 
                 "이익률": "{:.1f}%"
             }).background_gradient(subset=["영업이익 (월)", "이익률"], cmap="Greens").background_gradient(subset=["총 인건비 (월)", "인건비율"], cmap="Reds"), use_container_width=True)
+        
+        c2.download_button(
+            label="📥 엑셀 다운로드",
+            data=buffer.getvalue(),
+            file_name=f"taxi_analysis_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     with tab3:
         st.subheader("🧐 근무 형태별 수익성 상세")
@@ -458,6 +464,7 @@ if st.session_state.scenarios:
             else:
                 try:
                     today_date = datetime.now().strftime("%Y년 %m월 %d일")
+                    
                     context_info = f"""
                     [기초 환경 데이터]
                     - 현재 총 기사 수: {total_drivers}명 / 총 차량 대수: {n_cars}대
@@ -466,6 +473,7 @@ if st.session_state.scenarios:
                     - 차량 1대당 월 고정비(감가+보험+유지): 약 {int(car_fixed_cost_monthly):,}원
                     - 월 총 고정비(임대료+관리비+유휴차량비용): 약 {int(total_overhead_sum):,}원
                     - 1인당 배부된 월 공통비: {int(cost_overhead):,}원
+                    
                     [시나리오별 상세 결과]
                     """
                     for res in all_results_data:
@@ -476,14 +484,17 @@ if st.session_state.scenarios:
                     prompt = f"""
                     당신은 노련한 '택시 회사 경영 전문 컨설턴트'입니다.
                     아래 데이터(오늘 날짜: {today_date})를 바탕으로 정밀한 경영 분석 보고서를 작성하세요.
+
                     [분석할 데이터]
                     {context_info}
+
                     [작성 목차]
-                    1. 🏆 최적 시나리오 선정 및 이유
+                    1. 🆚 **시나리오별 정밀 비교 분석** (가장 중요: 시나리오 간 장단점 대조)
                     2. ⛽ 연료비 민감도 분석 (10% 상승 시 영향)
                     3. 👥 인력 운영 전략 (일차 vs 교대, 유휴 차량 최소화 방안)
                     4. 📉 손익분기점(BEP) 추정 (최소 기사 수)
                     5. 💡 최종 경영 제언 (구체적 실행 전략)
+
                     톤앤매너: 전문적이고 냉철하게, 한국어로 작성.
                     """
                     
@@ -494,6 +505,7 @@ if st.session_state.scenarios:
                         else:
                             st.success("✅ 심층 분석 완료!")
                             st.markdown(response_text)
+                    
                 except Exception as e:
                     st.error(f"AI 오류: {e}")
 
