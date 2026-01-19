@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import json
 
 # ---------------------------------------------------------
 # 설정 및 유틸리티
@@ -9,6 +10,10 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
 def currency_input(label, value, step=10000, key=None):
+    # Session State에 값이 있으면 그것을 우선 사용 (불러오기 기능 호환)
+    if key and key in st.session_state:
+        value = st.session_state[key]
+        
     val = st.number_input(label, value=value, step=step, format="%d", key=key)
     if val > 0:
         st.caption(f"👉 {int(val):,} 원") 
@@ -18,60 +23,120 @@ st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 1. 사이드바: 회사 기초 환경
+# 0. 데이터 저장/불러오기 (사이드바 최상단)
+# ---------------------------------------------------------
+with st.sidebar:
+    st.header("📂 데이터 저장 / 불러오기")
+    st.info("입력한 모든 값을 파일로 저장해두고, 나중에 다시 불러올 수 있습니다.")
+    
+    # 1. 불러오기 (Upload)
+    uploaded_file = st.file_uploader("이전에 저장한 파일 열기 (JSON)", type=["json"])
+    if uploaded_file is not None:
+        try:
+            data = json.load(uploaded_file)
+            
+            # 1. 기초 환경 데이터 복원
+            for key, value in data['basic_info'].items():
+                st.session_state[key] = value
+                
+            # 2. 시나리오 데이터 복원
+            st.session_state.scenarios = data['scenarios']
+            
+            st.success("✅ 데이터 복구 완료! (잠시 후 새로고침 됩니다)")
+            # 파일 로드 후 즉시 반영을 위해 리런
+            if st.button("복구된 데이터 적용하기"):
+                st.rerun()
+                
+        except Exception as e:
+            st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
+
+    # 2. 저장하기 (Download)
+    # 현재 Session State의 값들을 모아서 JSON 생성
+    def get_current_data():
+        # 사이드바 위젯의 키값들
+        keys_to_save = [
+            'n_day', 'n_night', 'n_shift', 'n_daily', 'n_cars',
+            'car_price', 'car_dep_years', 'car_maint', 'insurance_year',
+            'rent_cost', 'admin_salary_total',
+            'full_days', 'lpg_price',
+            'fuel_day', 'fuel_night', 'fuel_shift', 'fuel_daily',
+            'rate_pension', 'rate_health', 'rate_care_ratio', 
+            'rate_emp_unemp', 'rate_emp_stabil', 'rate_sanjae'
+        ]
+        
+        basic_info = {}
+        for k in keys_to_save:
+            if k in st.session_state:
+                basic_info[k] = st.session_state[k]
+        
+        return json.dumps({
+            "basic_info": basic_info,
+            "scenarios": st.session_state.get('scenarios', [])
+        }, indent=4, ensure_ascii=False)
+
+    if st.download_button(
+        label="💾 현재 작업 내용 PC에 저장하기",
+        data=get_current_data(),
+        file_name="taxi_profit_data.json",
+        mime="application/json"
+    ):
+        st.success("저장되었습니다! 다운로드 폴더를 확인하세요.")
+
+    st.markdown("---")
+
+# ---------------------------------------------------------
+# 1. 사이드바: 회사 기초 환경 설정 (Key 추가됨)
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("1. 회사 기초 환경 설정")
     
     with st.expander("① 인력 및 차량 구성", expanded=True):
         col1, col2 = st.columns(2)
-        n_day = col1.number_input("주간 기사 수", value=0)
-        n_night = col2.number_input("야간 기사 수", value=0)
-        n_shift = col1.number_input("교대 기사 수", value=0)
-        n_daily = col2.number_input("일차 기사 수", value=0)
+        n_day = col1.number_input("주간 기사 수", value=0, key="n_day")
+        n_night = col2.number_input("야간 기사 수", value=0, key="n_night")
+        n_shift = col1.number_input("교대 기사 수", value=0, key="n_shift")
+        n_daily = col2.number_input("일차 기사 수", value=0, key="n_daily")
         
         total_drivers = n_day + n_night + n_shift + n_daily
         st.write(f"**총 기사 수: {total_drivers}명**")
-        n_cars = st.number_input("차량 등록 대수", value=0)
+        n_cars = st.number_input("차량 등록 대수", value=0, key="n_cars")
 
     with st.expander("② 차량 및 운영 비용 (VAT 포함값)", expanded=True):
         st.info("내부 계산 시 /1.1 하여 공급가액만 비용 반영함")
-        car_price = currency_input("차량 구입비", 0, step=1000000)
-        car_dep_years = st.number_input("감가상각년수 (년)", value=0)
-        car_maint = currency_input("차량 유지비 (1대/월)", 0, step=10000)
-        insurance_year = currency_input("보험료 (1대/연간-면세)", 0, step=10000)
+        car_price = currency_input("차량 구입비", 0, step=1000000, key="car_price")
+        car_dep_years = st.number_input("감가상각년수 (년)", value=0, key="car_dep_years")
+        car_maint = currency_input("차량 유지비 (1대/월)", 0, step=10000, key="car_maint")
+        insurance_year = currency_input("보험료 (1대/연간-면세)", 0, step=10000, key="insurance_year")
         
         st.markdown("---")
-        rent_cost = currency_input("차고지 임대료 (월)", 0, step=100000)
-        admin_salary_total = currency_input("관리 직원 급여 (월)", 0, step=500000)
+        rent_cost = currency_input("차고지 임대료 (월)", 0, step=100000, key="rent_cost")
+        admin_salary_total = currency_input("관리 직원 급여 (월)", 0, step=500000, key="admin_salary_total")
         
-    # [수정] 제목 변경 및 기본 펼침(expanded=True) 설정
     with st.expander("③ 연료 및 지급 기준", expanded=True):
-        full_days = st.number_input("월 만근 일수", value=0)
-        lpg_price = st.number_input("LPG 단가 (원/L - VAT포함)", value=0)
+        full_days = st.number_input("월 만근 일수", value=0, key="full_days")
+        lpg_price = st.number_input("LPG 단가 (원/L - VAT포함)", value=0, key="lpg_price")
         
         st.write("1일 평균 연료량(L)")
         c1, c2 = st.columns(2)
-        fuel_day = c1.number_input("주간 연료", value=0)
-        fuel_night = c2.number_input("야간 연료", value=0)
-        fuel_shift = c1.number_input("교대 연료", value=0)
-        fuel_daily = c2.number_input("일차 연료", value=0)
+        fuel_day = c1.number_input("주간 연료", value=0, key="fuel_day")
+        fuel_night = c2.number_input("야간 연료", value=0, key="fuel_night")
+        fuel_shift = c1.number_input("교대 연료", value=0, key="fuel_shift")
+        fuel_daily = c2.number_input("일차 연료", value=0, key="fuel_daily")
 
     with st.expander("④ 2026년 4대보험 요율 (고정값)", expanded=True):
         st.caption("※ 2026년 기준 요율 (수정 가능)")
-        rate_pension = st.number_input("국민연금 (%)", value=4.75, format="%.2f") / 100
-        rate_health = st.number_input("건강보험 (%)", value=3.595, format="%.3f") / 100
-        rate_care_ratio = st.number_input("장기요양(건보료비례 %)", value=13.14, format="%.2f") / 100
+        rate_pension = st.number_input("국민연금 (%)", value=4.75, format="%.2f", key="rate_pension") / 100
+        rate_health = st.number_input("건강보험 (%)", value=3.595, format="%.3f", key="rate_health") / 100
+        rate_care_ratio = st.number_input("장기요양(건보료비례 %)", value=13.14, format="%.2f", key="rate_care_ratio") / 100
         st.markdown("---")
-        rate_emp_unemp = st.number_input("실업급여요율 (%)", value=0.90, format="%.2f") / 100
-        rate_emp_stabil = st.number_input("고용안정/직능 (%)", value=0.25, format="%.2f") / 100
-        rate_sanjae = st.number_input("산재보험 (%)", value=0.65, format="%.2f") / 100
+        rate_emp_unemp = st.number_input("실업급여요율 (%)", value=0.90, format="%.2f", key="rate_emp_unemp") / 100
+        rate_emp_stabil = st.number_input("고용안정/직능 (%)", value=0.25, format="%.2f", key="rate_emp_stabil") / 100
+        rate_sanjae = st.number_input("산재보험 (%)", value=0.65, format="%.2f", key="rate_sanjae") / 100
 
 # ---------------------------------------------------------
 # 2. 시나리오 입력
 # ---------------------------------------------------------
 st.header("2. 시나리오 등록")
-# [삭제] 안내 문구 삭제함
 
 if 'scenarios' not in st.session_state:
     st.session_state.scenarios = []
@@ -86,7 +151,6 @@ with st.form("scenario_form"):
     h1, h2, h3, h4 = st.columns([1, 2, 2, 2])
     h1.markdown("**구분**")
     h2.markdown("**월 급여 총액 (비과세 포함)**")
-    # [수정] 헤더 텍스트 변경
     h3.markdown("**비과세 금액(예. 야간수당)**")
     h4.markdown("**🔴 1일 사납금**")
 
