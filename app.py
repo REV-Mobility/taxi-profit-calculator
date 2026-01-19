@@ -68,12 +68,10 @@ def load_data_callback():
         except Exception as e:
             st.error(f"데이터 파일 읽기 실패: {e}")
 
-# [수정] API Key 처리 로직 (Secrets 우선 사용)
+# API Key 처리 로직
 def get_api_key():
-    # 1. Streamlit Secrets에서 키를 찾음 (배포 환경)
     if "GOOGLE_API_KEY" in st.secrets:
         return st.secrets["GOOGLE_API_KEY"]
-    # 2. 로컬 환경 변수 등 다른 곳에 있다면 여기서 처리 (생략)
     return None
 
 def generate_analysis(api_key, prompt):
@@ -109,7 +107,7 @@ st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 사이드바 & 입력 로직 (기존 유지)
+# 사이드바 & 입력 로직
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("1. 회사 기초 환경 설정")
@@ -235,9 +233,7 @@ if st.session_state.scenarios:
     total_overhead_sum = net_rent_cost + net_admin_salary + total_leakage_cost
     cost_overhead = total_overhead_sum / total_drivers if total_drivers > 0 else 0
 
-    if total_leakage_cost > 0:
-        st.warning(f"⚠️ **차량 유휴(미매칭) 비용 발생:** 월 {int(total_leakage_cost):,}원")
-        st.caption(f"· 빈 슬롯: {empty_slots}개 × 슬롯당 {int(cost_per_half_slot):,}원 (공통 운영비에 포함)")
+    # [수정] 유휴 비용 경고창 제거 (계산에만 반영됨)
 
     def get_car_cost_details(driver_type):
         ratio = 1.0 if driver_type == 'single' else 0.5
@@ -415,17 +411,17 @@ if st.session_state.scenarios:
                 else: return ['background-color: white; color: #2980b9'] * len(row)
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=800)
 
-    # [수정된 AI 탭 - API 키 자동 감지]
+    # [수정된 AI 탭 - 불필요한 메시지 제거]
     with tab5:
-        st.subheader("🤖 AI 경영 컨설턴트 (Powered by Gemini)")
-        st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략, 손익분기점, 연료 민감도**를 심층 분석합니다.")
+        st.subheader("🤖 AI 경영 컨설턴트") # (Powered by Gemini 삭제)
+        st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
         
         # 1. API 키 확인 (Secrets vs 입력창)
         secret_key = get_api_key()
         user_key = None
         
         if secret_key:
-            st.success("✅ **시스템 API Key가 감지되었습니다.** (별도 입력 불필요)")
+            # st.success 메시지 삭제 (조용히 키 할당)
             final_api_key = secret_key
         else:
             st.info("💡 등록된 시스템 키가 없습니다. 개인 API Key를 입력해주세요.")
@@ -477,7 +473,7 @@ if st.session_state.scenarios:
                         if "오류" in response_text:
                             st.error(response_text)
                         else:
-                            st.success(f"✅ 심층 분석 완료! (모델: {model_name})")
+                            st.success("✅ 심층 분석 완료!") # 모델명 표시 제거
                             st.markdown(response_text)
                     
                 except Exception as e:
