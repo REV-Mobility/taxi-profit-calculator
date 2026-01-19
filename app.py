@@ -45,7 +45,8 @@ with st.sidebar:
         rent_cost = currency_input("차고지 임대료 (월)", 0, step=100000)
         admin_salary_total = currency_input("관리 직원 급여 (월)", 0, step=500000)
         
-    with st.expander("③ 연료 및 운행 기준", expanded=False):
+    # [수정] 제목 변경 및 기본 펼침(expanded=True) 설정
+    with st.expander("③ 연료 및 지급 기준", expanded=True):
         full_days = st.number_input("월 만근 일수", value=0)
         lpg_price = st.number_input("LPG 단가 (원/L - VAT포함)", value=0)
         
@@ -70,7 +71,7 @@ with st.sidebar:
 # 2. 시나리오 입력
 # ---------------------------------------------------------
 st.header("2. 시나리오 등록")
-st.markdown("※ 소정근로시간을 시나리오별로 다르게 설정하여 **연차수당 변동**을 테스트할 수 있습니다.")
+# [삭제] 안내 문구 삭제함
 
 if 'scenarios' not in st.session_state:
     st.session_state.scenarios = []
@@ -85,7 +86,8 @@ with st.form("scenario_form"):
     h1, h2, h3, h4 = st.columns([1, 2, 2, 2])
     h1.markdown("**구분**")
     h2.markdown("**월 급여 총액 (비과세 포함)**")
-    h3.markdown("**그 중 비과세 금액**")
+    # [수정] 헤더 텍스트 변경
+    h3.markdown("**비과세 금액(예. 야간수당)**")
     h4.markdown("**🔴 1일 사납금**")
 
     def input_row(label):
@@ -208,27 +210,34 @@ if st.session_state.scenarios:
             
             rows = []
             rows.append(("1. 월 매출(사납금)", monthly_sanap, f"{sanap:,}원 × {full_days}일"))
+            
             rows.append(("▼ 매출 공제(세금/수수료)", -(vat_out + card_fee), ""))
             rows.append(("   └ 부가세(매출세액)", -vat_out, "사납금의 10/110"))
             rows.append(("   └ 카드수수료", -card_fee, "사납금의 1.5%"))
+            
             rows.append(("▼ 연료비(Net)", -net_fuel_cost, "부가세 제외 공급가 기준"))
+            
             rows.append(("▼ 차량 고정비 합계", -total_car_fixed, "감가+보험+유지"))
             rows.append(("   └ 감가상각비", -c_dep, ""))
             rows.append(("   └ 보험료", -c_ins, ""))
             rows.append(("   └ 유지비", -c_maint, ""))
+            
             rows.append(("▼ 인건비 합계", -total_labor_cost, f"매출 대비 {labor_ratio:.1f}%"))
             rows.append(("   └ 급여 지급액(Gross)", -total_pay, "입력된 총액"))
             rows.append(("   └ 퇴직금 적립액", -severance, "급여총액 ÷ 12"))
             rows.append(("   └ 연차수당", -annual_leave, f"{hourly_wage:,}원×{work_time_sc}h×1.25"))
+            
             rows.append(("   ▼ [상세] 4대보험 계", -total_4ins, ""))
             rows.append(("      - 국민연금", -ins_pension, f"{rate_pension*100:.2f}%"))
             rows.append(("      - 건강보험", -ins_health, f"{rate_health*100:.3f}%"))
             rows.append(("      - 장기요양", -ins_care, f"건보료의 {rate_care_ratio*100:.2f}%"))
             rows.append(("      - 고용보험", -ins_emp, f"{(rate_emp_unemp+rate_emp_stabil)*100:.2f}%"))
             rows.append(("      - 산재보험", -ins_sanjae, f"{rate_sanjae*100:.2f}%"))
+            
             rows.append(("▼ 공통 운영비 합계", -cost_overhead, ""))
             rows.append(("   └ 차고지 임대료", -per_person_rent, ""))
             rows.append(("   └ 관리직원 급여", -per_person_admin, ""))
+            
             rows.append(("■ 최종 영업이익", profit_person, "매출 - 비용합계"))
             debug_rows[f"{sc_data['name']} - {t_name}"] = rows
 
@@ -255,7 +264,7 @@ if st.session_state.scenarios:
     # --- 탭 구성 ---
     tab1, tab2, tab3, tab4 = st.tabs(["🎛️ 사납금 조정 시뮬레이션", "🏆 시나리오 총괄 비교", "📊 근무형태별 분석", "🧾 상세 계산 검증"])
 
-    # [Tab 1] 사납금 조정 (수정됨: 키 값을 동적으로 부여)
+    # [Tab 1] 사납금 조정
     with tab1:
         st.subheader("🎛️ 사납금 조정 시뮬레이터 (What-If)")
         sc_names = [sc['name'] for sc in st.session_state.scenarios]
@@ -267,7 +276,6 @@ if st.session_state.scenarios:
         st.write(f"▼ **'{selected_sc_name}'의 1일 사납금을 조정해 보세요.**")
         ac1, ac2, ac3, ac4 = st.columns(4)
         
-        # [핵심 수정] key에 selected_sc_idx를 포함시켜서 시나리오 변경 시 입력창 값을 강제 리셋(업데이트)
         new_day = ac1.number_input("주간 사납금", value=origin_sc['day']['sanap'], step=1000, key=f"sim_day_{selected_sc_idx}")
         new_night = ac2.number_input("야간 사납금", value=origin_sc['night']['sanap'], step=1000, key=f"sim_night_{selected_sc_idx}")
         new_shift = ac3.number_input("교대 사납금", value=origin_sc['shift']['sanap'], step=1000, key=f"sim_shift_{selected_sc_idx}")
@@ -293,7 +301,7 @@ if st.session_state.scenarios:
             st.success("✅ 업데이트 완료! 다른 탭에서 변경된 결과를 확인하세요.")
             st.rerun()
 
-    # [Tab 2, 3, 4] 기존 로직 유지
+    # [Tab 2] 총괄 비교
     with tab2:
         st.subheader("🏆 시나리오 총괄 비교표")
         summary_rows = []
@@ -312,6 +320,7 @@ if st.session_state.scenarios:
                 "인건비율": "{:.1f}%", "이익률": "{:.1f}%"
             }).background_gradient(subset=["영업이익", "이익률"], cmap="Greens").background_gradient(subset=["총 인건비", "인건비율"], cmap="Reds"), use_container_width=True)
 
+    # [Tab 3] 근무형태별 분석
     with tab3:
         st.subheader("🧐 근무 형태별 수익성 상세")
         if all_results_data:
@@ -328,6 +337,7 @@ if st.session_state.scenarios:
             fig_rate.update_traces(texttemplate='%{text:.1f}%')
             c2.plotly_chart(fig_rate, use_container_width=True)
 
+    # [Tab 4] 상세 계산 검증
     with tab4:
         st.info("💡 **[▼]** 표시된 항목은 합계, **[└]** 는 상세 내역입니다.")
         selected_key = st.selectbox("검증할 대상", list(global_debug.keys()))
