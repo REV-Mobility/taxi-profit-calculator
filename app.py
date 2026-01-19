@@ -10,9 +10,10 @@ import google.generativeai as genai
 # ---------------------------------------------------------
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
-# CSS: 노란색 하이라이트 디자인
+# CSS: 디자인 강화 + 파일 업로더 한글화
 st.markdown("""
 <style>
+    /* 1. 입력창 디자인 (노란색 포스트잇 스타일) */
     div[data-baseweb="input"] {
         background-color: #ffffd0 !important;
         border: 1px solid #dcdcdc !important;
@@ -32,6 +33,21 @@ st.markdown("""
     button[data-baseweb="tab"] {
         font-weight: bold !important;
         font-size: 16px !important;
+    }
+    
+    /* 2. [NEW] 파일 업로더 문구 한글화 (CSS Hack) */
+    /* 기존 영어 텍스트 숨기기 */
+    section[data-testid="stFileUploaderDropzone"] > div > div > small {
+        display: none !important;
+    }
+    /* 한글 텍스트 덮어쓰기 */
+    section[data-testid="stFileUploaderDropzone"] > div > div::after {
+        content: "여기에 파일을 드래그하거나 클릭하여 업로드하세요.";
+        font-size: 14px;
+        font-weight: bold;
+        color: #555;
+        display: block;
+        margin-top: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -188,51 +204,34 @@ st.markdown("---")
 st.header("3. 상세 검증 및 분석")
 
 if st.session_state.scenarios:
-    # -----------------------------------------------------
-    # [핵심 로직 수정] 유휴 차량(Empty Slots) 비용 반영
-    # -----------------------------------------------------
+    # --- 유휴 차량 비용 로직 (v3.1) ---
     net_rent_cost = rent_cost / 1.1
     net_admin_salary = admin_salary_total
     
-    # 차량 1대당 월 고정비 (Net)
     net_car_price = car_price / 1.1
     net_car_maint_val = car_maint / 1.1
     monthly_dep = (net_car_price / car_dep_years / 12) if car_dep_years > 0 else 0
     monthly_ins = (insurance_year / 12)
     car_fixed_cost_monthly = monthly_dep + monthly_ins + net_car_maint_val
     
-    # 1. 일차 기사 할당 (1인 1차)
     cars_used_by_daily = n_daily
-    
-    # 2. 공유 차량(주간/야간/교대) 계산
-    # 남은 차량 수
     cars_available_for_shared = n_cars - cars_used_by_daily
     if cars_available_for_shared < 0: cars_available_for_shared = 0
     
-    # 공유 차량의 총 가용 슬롯 (오전+오후 = 차량수 * 2)
     total_slots_shared = cars_available_for_shared * 2
-    
-    # 실제 사용된 슬롯 (주간 + 야간 + 교대)
     used_slots_shared = n_day + n_night + n_shift
-    
-    # 3. 유휴 슬롯(빈 좌석) 및 누수 비용 계산
     empty_slots = total_slots_shared - used_slots_shared
-    if empty_slots < 0: empty_slots = 0 # 기사가 차보다 많으면 0
+    if empty_slots < 0: empty_slots = 0
     
-    # 슬롯 1개당 비용 = 차량 1대 고정비의 절반
     cost_per_half_slot = car_fixed_cost_monthly / 2
     total_leakage_cost = empty_slots * cost_per_half_slot
     
-    # 4. 최종 공통비(Overhead) 재산정
-    # (임대료 + 관리비 + ★차량 유휴 비용★) / 전체 기사 수
     total_overhead_sum = net_rent_cost + net_admin_salary + total_leakage_cost
     cost_overhead = total_overhead_sum / total_drivers if total_drivers > 0 else 0
 
-    # [UI 표시] 유휴 비용 발생 시 알림
     if total_leakage_cost > 0:
         st.warning(f"⚠️ **차량 유휴(미매칭) 비용 발생:** 월 {int(total_leakage_cost):,}원")
-        st.caption(f"· 빈 슬롯: {empty_slots}개 × 슬롯당 {int(cost_per_half_slot):,}원")
-        st.caption(f"· 이 비용은 '공통 운영비'에 포함되어 전체 기사에게 배분됩니다.")
+        st.caption(f"· 빈 슬롯: {empty_slots}개 × 슬롯당 {int(cost_per_half_slot):,}원 (공통 운영비에 포함)")
 
     def get_car_cost_details(driver_type):
         ratio = 1.0 if driver_type == 'single' else 0.5
@@ -289,7 +288,6 @@ if st.session_state.scenarios:
             total_4ins = ins_pension + ins_health + ins_care + ins_emp + ins_sanjae
             total_labor_cost = total_pay + severance + annual_leave + total_4ins
             
-            # 여기서 cost_overhead는 이미 '유휴 비용'이 포함된 값입니다.
             total_cost_person = (vat_out + card_fee + net_fuel_cost + total_car_fixed + total_labor_cost + cost_overhead)
             profit_person = monthly_sanap - total_cost_person
             
@@ -329,8 +327,7 @@ if st.session_state.scenarios:
             rows.append(("      - 고용보험", -ins_emp, f"{(rate_emp_unemp+rate_emp_stabil)*100:.2f}%"))
             rows.append(("      - 산재보험", -ins_sanjae, f"{rate_sanjae*100:.2f}%"))
             
-            # 공통 운영비 내역에 유휴 비용 포함 여부 표기
-            rows.append(("▼ 공통 운영비 합계", -cost_overhead, "임대+관리+유휴차량비용"))
+            rows.append(("▼ 공통 운영비 합계", -cost_overhead, ""))
             rows.append(("   └ 차고지 임대료", -(net_rent_cost/total_drivers), ""))
             rows.append(("   └ 관리직원 급여", -(net_admin_salary/total_drivers), ""))
             if total_leakage_cost > 0:
@@ -404,17 +401,21 @@ if st.session_state.scenarios:
         for res in all_results_data:
             summary_rows.append({
                 "시나리오명": res['name'],
-                "총 매출": res['revenue'],
-                "총 인건비": res['labor'],
-                "영업이익": res['profit'],
+                "총 매출 (월)": res['revenue'],
+                "총 인건비 (월)": res['labor'],
+                "영업이익 (월)": res['profit'],
                 "인건비율": res['labor_rate'],
                 "이익률": res['margin']
             })
         df_summary = pd.DataFrame(summary_rows)
+        # [수정] 헤더 표시 형식 변경: (월) 표기 추가
         st.dataframe(df_summary.style.format({
-                "총 매출": "{:,.0f}", "총 인건비": "{:,.0f}", "영업이익": "{:,.0f}", 
-                "인건비율": "{:.1f}%", "이익률": "{:.1f}%"
-            }).background_gradient(subset=["영업이익", "이익률"], cmap="Greens").background_gradient(subset=["총 인건비", "인건비율"], cmap="Reds"), use_container_width=True)
+                "총 매출 (월)": "{:,.0f}", 
+                "총 인건비 (월)": "{:,.0f}", 
+                "영업이익 (월)": "{:,.0f}", 
+                "인건비율": "{:.1f}%", 
+                "이익률": "{:.1f}%"
+            }).background_gradient(subset=["영업이익 (월)", "이익률"], cmap="Greens").background_gradient(subset=["총 인건비 (월)", "인건비율"], cmap="Reds"), use_container_width=True)
 
     with tab3:
         st.subheader("🧐 근무 형태별 수익성 상세")
