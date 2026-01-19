@@ -22,7 +22,7 @@ st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 1. 사이드바: 회사 기초 환경 설정 (상단 배치)
+# 1. 사이드바: 회사 기초 환경 설정
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("1. 회사 기초 환경 설정")
@@ -71,18 +71,23 @@ with st.sidebar:
         rate_sanjae = st.number_input("산재보험 (%)", value=0.65, format="%.2f", key="rate_sanjae") / 100
 
 # ---------------------------------------------------------
-# 2. 시나리오 입력
+# 2. 시나리오 입력 (안전 초기화 방식 적용)
 # ---------------------------------------------------------
 st.header("2. 시나리오 등록")
 
 if 'scenarios' not in st.session_state:
     st.session_state.scenarios = []
 
+# [핵심] 폼 초기화를 위한 ID 관리
+if 'form_id' not in st.session_state:
+    st.session_state.form_id = 0
+
 with st.form("scenario_form"):
     c_name, c_wage, c_time = st.columns([2, 1, 1])
-    s_name = c_name.text_input("시나리오 이름", "", key="reg_name")
-    s_hourly = c_wage.number_input("통상 시급(원)", value=0, format="%d", key="reg_hourly")
-    s_work_time = c_time.number_input("1일 소정근로(시간)", value=0.0, step=0.1, format="%.2f", key="reg_time")
+    # Key에 form_id를 붙여서, 저장 시 id를 바꾸면 입력창이 새것으로 교체됨
+    s_name = c_name.text_input("시나리오 이름", "", key=f"reg_name_{st.session_state.form_id}")
+    s_hourly = c_wage.number_input("통상 시급(원)", value=0, format="%d", key=f"reg_hourly_{st.session_state.form_id}")
+    s_work_time = c_time.number_input("1일 소정근로(시간)", value=0.0, step=0.1, format="%.2f", key=f"reg_time_{st.session_state.form_id}")
 
     st.markdown("---")
     h1, h2, h3, h4 = st.columns([1, 2, 2, 2])
@@ -94,9 +99,11 @@ with st.form("scenario_form"):
     def input_row(label, key_prefix):
         c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
         c1.markdown(f"###### {label}")
-        pay = c2.number_input(f"{label}총액", value=0, step=10000, label_visibility="collapsed", key=f"reg_pay_{key_prefix}")
-        tf = c3.number_input(f"{label}비과세", value=0, step=10000, label_visibility="collapsed", key=f"reg_tf_{key_prefix}")
-        sanap = c4.number_input(f"{label}사납금", value=0, step=1000, label_visibility="collapsed", key=f"reg_sanap_{key_prefix}")
+        # Key Pattern: reg_pay_day_0, reg_pay_day_1 ...
+        fid = st.session_state.form_id
+        pay = c2.number_input(f"{label}총액", value=0, step=10000, label_visibility="collapsed", key=f"reg_pay_{key_prefix}_{fid}")
+        tf = c3.number_input(f"{label}비과세", value=0, step=10000, label_visibility="collapsed", key=f"reg_tf_{key_prefix}_{fid}")
+        sanap = c4.number_input(f"{label}사납금", value=0, step=1000, label_visibility="collapsed", key=f"reg_sanap_{key_prefix}_{fid}")
         return pay, tf, sanap
 
     sal_day, tf_day, sanap_day = input_row("주간", "day")
@@ -108,6 +115,7 @@ with st.form("scenario_form"):
         if s_name == "":
             st.error("시나리오 이름을 입력해주세요.")
         else:
+            # 1. 데이터 저장
             st.session_state.scenarios.append({
                 "name": s_name, 
                 "hourly": s_hourly,
@@ -119,14 +127,8 @@ with st.form("scenario_form"):
             })
             st.success(f"[{s_name}] 추가되었습니다.")
             
-            # 입력값 초기화 (Reset)
-            st.session_state["reg_name"] = ""
-            st.session_state["reg_hourly"] = 0
-            st.session_state["reg_time"] = 0.0
-            for k in ["day", "night", "shift", "daily"]:
-                st.session_state[f"reg_pay_{k}"] = 0
-                st.session_state[f"reg_tf_{k}"] = 0
-                st.session_state[f"reg_sanap_{k}"] = 0
+            # 2. [오류 해결] 폼 ID를 증가시켜서 다음 렌더링 때 '새로운 입력창'을 불러오게 함
+            st.session_state.form_id += 1
             st.rerun()
 
 # ---------------------------------------------------------
@@ -257,18 +259,15 @@ if st.session_state.scenarios:
             "debug": debug_rows
         }
 
-    # --- 계산 실행 ---
     all_results_data = [calculate_scenario(sc) for sc in st.session_state.scenarios]
     global_debug = {}
     for res in all_results_data:
         global_debug.update(res['debug'])
 
-    # --- 탭 구성 (AI 추가됨) ---
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🎛️ 사납금 조정", "🏆 시나리오 비교", "📊 근무형태별 분석", "🧾 상세 계산 검증", "🤖 AI 경영 컨설팅"
     ])
 
-    # [Tab 1] 사납금 조정
     with tab1:
         st.subheader("🎛️ 사납금 조정 시뮬레이터 (What-If)")
         sc_names = [sc['name'] for sc in st.session_state.scenarios]
@@ -279,6 +278,8 @@ if st.session_state.scenarios:
         
         st.write(f"▼ **'{selected_sc_name}'의 1일 사납금을 조정해 보세요.**")
         ac1, ac2, ac3, ac4 = st.columns(4)
+        
+        # 키값 동적 할당
         new_day = ac1.number_input("주간 사납금", value=origin_sc['day']['sanap'], step=1000, key=f"sim_day_{selected_sc_idx}")
         new_night = ac2.number_input("야간 사납금", value=origin_sc['night']['sanap'], step=1000, key=f"sim_night_{selected_sc_idx}")
         new_shift = ac3.number_input("교대 사납금", value=origin_sc['shift']['sanap'], step=1000, key=f"sim_shift_{selected_sc_idx}")
@@ -304,7 +305,6 @@ if st.session_state.scenarios:
             st.success("✅ 업데이트 완료!")
             st.rerun()
 
-    # [Tab 2] 총괄 비교
     with tab2:
         st.subheader("🏆 시나리오 총괄 비교표")
         summary_rows = []
@@ -323,7 +323,6 @@ if st.session_state.scenarios:
                 "인건비율": "{:.1f}%", "이익률": "{:.1f}%"
             }).background_gradient(subset=["영업이익", "이익률"], cmap="Greens").background_gradient(subset=["총 인건비", "인건비율"], cmap="Reds"), use_container_width=True)
 
-    # [Tab 3] 근무형태별 분석
     with tab3:
         st.subheader("🧐 근무 형태별 수익성 상세")
         if all_results_data:
@@ -340,7 +339,6 @@ if st.session_state.scenarios:
             fig_rate.update_traces(texttemplate='%{text:.1f}%')
             c2.plotly_chart(fig_rate, use_container_width=True)
 
-    # [Tab 4] 상세 계산 검증
     with tab4:
         st.info("💡 **[▼]** 표시된 항목은 합계, **[└]** 는 상세 내역입니다.")
         selected_key = st.selectbox("검증할 대상", list(global_debug.keys()))
@@ -354,13 +352,9 @@ if st.session_state.scenarios:
                 else: return ['background-color: white; color: #2980b9'] * len(row)
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=800)
 
-    # [Tab 5] AI 경영 컨설팅 (New)
     with tab5:
         st.subheader("🤖 AI 경영 컨설턴트 (Powered by Gemini)")
-        st.markdown("""
-        입력된 시나리오 데이터를 분석하여 **가장 이익이 높은 시나리오 추천**, **리스크 요인 분석**, **수익 개선 전략**을 제안합니다.
-        """)
-        
+        st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
         api_key = st.text_input("Google API Key를 입력하세요", type="password")
         
         if st.button("AI 분석 요청하기"):
@@ -370,29 +364,22 @@ if st.session_state.scenarios:
                 try:
                     genai.configure(api_key=api_key)
                     model = genai.GenerativeModel('gemini-pro')
-                    
-                    # 프롬프트 생성
                     prompt = f"""
                     당신은 전문적인 택시 회사 경영 컨설턴트입니다.
-                    아래는 한 택시 회사의 여러 급여/사납금 시나리오에 따른 예상 수익 분석 결과입니다.
-                    
+                    아래는 택시 회사의 시나리오별 예상 수익 분석입니다.
                     [데이터 요약]
                     {summary_rows}
                     
-                    이 데이터를 바탕으로 다음 내용을 포함한 보고서를 작성해 주세요:
-                    1. **최고의 시나리오 추천:** 영업이익과 이익률이 가장 좋은 안은 무엇인가요?
-                    2. **리스크 분석:** 인건비율이 과도하게 높은 시나리오가 있나요? (통상 60~70% 기준)
-                    3. **전략 제안:** 수익성을 더 높이기 위해 경영진이 고려해야 할 점은 무엇인가요? (예: 사납금 조정, 차량 가동률 등)
-                    
-                    한국어로 정중하고 전문적인 톤으로 답변해 주세요.
+                    다음 내용을 포함한 보고서를 한국어로 작성해주세요:
+                    1. **최고의 시나리오 추천:** 이익이 가장 좋은 안은 무엇인가요?
+                    2. **리스크 분석:** 인건비율이 적정한가요?
+                    3. **전략 제안:** 경영진이 고려해야 할 구체적인 개선점은?
                     """
-                    
                     with st.spinner("AI가 데이터를 분석 중입니다..."):
                         response = model.generate_content(prompt)
                         st.markdown(response.text)
-                        
                 except Exception as e:
-                    st.error(f"AI 분석 중 오류가 발생했습니다: {e}")
+                    st.error(f"AI 오류: {e}")
 
 else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
