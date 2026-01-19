@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import json
 import google.generativeai as genai
+from datetime import datetime  # [추가] 날짜 기능을 위해 필요
 
 # ---------------------------------------------------------
 # 설정 및 유틸리티
@@ -69,7 +70,7 @@ def load_data_callback():
             st.error(f"데이터 파일 읽기 실패: {e}")
 
 # ---------------------------------------------------------
-# [핵심 수정] 사용 가능한 모델 자동 탐색 및 실행 함수
+# 사용 가능한 모델 자동 탐색 및 실행 함수
 # ---------------------------------------------------------
 def generate_analysis(api_key, prompt):
     genai.configure(api_key=api_key)
@@ -96,13 +97,11 @@ def generate_analysis(api_key, prompt):
                 valid_model_name = p_model
                 break
         
-        # 목록에 없지만 리스트가 비어있지 않다면 첫 번째 것 선택
         if not valid_model_name and available_models:
             valid_model_name = available_models[0]
             
     except Exception as e:
-        # list_models가 막힌 경우, 가장 안전한 legacy 모델 강제 시도
-        valid_model_name = 'gemini-pro'
+        valid_model_name = 'gemini-pro' # 최후의 수단
 
     if not valid_model_name:
         return "사용 가능한 AI 모델을 찾을 수 없습니다. API Key 권한을 확인해주세요.", "Unknown"
@@ -487,6 +486,9 @@ if st.session_state.scenarios:
                 st.error("API Key가 필요합니다.")
             else:
                 try:
+                    # [오늘 날짜 반영]
+                    today_date = datetime.now().strftime("%Y년 %m월 %d일")
+                    
                     # 1. AI에게 보낼 상세 데이터 구성 (Context)
                     context_info = f"""
                     [기초 환경 데이터]
@@ -506,11 +508,13 @@ if st.session_state.scenarios:
                         context_info += f"   - 영업이익률: {res['margin']:.2f}% / 인건비율: {res['labor_rate']:.2f}%\n"
                         context_info += f"   - (참고) 이 시나리오의 1인당 평균 인건비: {int(res['labor']/total_drivers):,}원\n"
 
-                    # 2. 강력해진 프롬프트 (Prompt Engineering)
+                    # 2. 강력해진 프롬프트 (Prompt Engineering) + 날짜 주입
                     prompt = f"""
                     당신은 노련한 '택시 회사 경영 전문 컨설턴트'입니다.
                     아래 제공된 [기초 환경 데이터]와 [시나리오별 상세 결과]를 바탕으로 정밀한 경영 분석 보고서를 작성해 주세요.
                     단순히 결과를 나열하지 말고, 경영자가 의사결정을 할 수 있도록 구체적인 통찰(Insight)을 제공해야 합니다.
+
+                    [오늘 날짜] {today_date} (보고서 상단에 이 날짜를 기재하세요)
 
                     [분석할 데이터]
                     {context_info}
@@ -537,7 +541,6 @@ if st.session_state.scenarios:
                     """
                     
                     with st.spinner("AI가 데이터를 분석 중입니다... (모델 탐색 중)"):
-                        # [핵심] 자동 모델 탐색 함수 호출
                         response_text, model_name = generate_analysis(api_key, prompt)
                     
                     st.success(f"✅ 심층 분석 완료! (모델: {model_name})")
