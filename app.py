@@ -212,7 +212,7 @@ st.markdown("---")
 st.header("3. 상세 검증 및 분석")
 
 if st.session_state.scenarios:
-    # 계산 로직 (유휴 비용 포함)
+    # 계산 로직
     net_rent_cost = rent_cost / 1.1
     net_admin_salary = admin_salary_total
     net_car_price = car_price / 1.1
@@ -232,8 +232,6 @@ if st.session_state.scenarios:
     total_leakage_cost = empty_slots * cost_per_half_slot
     total_overhead_sum = net_rent_cost + net_admin_salary + total_leakage_cost
     cost_overhead = total_overhead_sum / total_drivers if total_drivers > 0 else 0
-
-    # [수정] 유휴 비용 경고창 제거 (계산에만 반영됨)
 
     def get_car_cost_details(driver_type):
         ratio = 1.0 if driver_type == 'single' else 0.5
@@ -272,20 +270,25 @@ if st.session_state.scenarios:
             net_fuel_cost = fuel_liter * (lpg_price / 1.1)
             c_dep, c_ins, c_maint = get_car_cost_details(d_type)
             total_car_fixed = c_dep + c_ins + c_maint
+            
             total_pay = pay
             taxable_pay = pay - tf
             if taxable_pay < 0: taxable_pay = 0
             severance = total_pay / 12 
             annual_leave = hourly_wage * work_time_sc * 1.25
+            
             ins_pension = taxable_pay * rate_pension
             ins_health = taxable_pay * rate_health
             ins_care = ins_health * rate_care_ratio
             ins_emp = taxable_pay * (rate_emp_unemp + rate_emp_stabil)
             ins_sanjae = total_pay * rate_sanjae
+            
             total_4ins = ins_pension + ins_health + ins_care + ins_emp + ins_sanjae
             total_labor_cost = total_pay + severance + annual_leave + total_4ins
+            
             total_cost_person = (vat_out + card_fee + net_fuel_cost + total_car_fixed + total_labor_cost + cost_overhead)
             profit_person = monthly_sanap - total_cost_person
+            
             group_profit = profit_person * count
             total_profit += group_profit
             total_revenue += (monthly_sanap * count)
@@ -299,15 +302,39 @@ if st.session_state.scenarios:
                 "1인 인건비": total_labor_cost,
                 "인건비율": labor_ratio
             })
+            
+            # [복구된 상세 내역]
             rows = []
             rows.append(("1. 월 매출(사납금)", monthly_sanap, f"{sanap:,}원 × {full_days}일"))
+            
             rows.append(("▼ 매출 공제(세금/수수료)", -(vat_out + card_fee), ""))
-            rows.append(("▼ 연료비(Net)", -net_fuel_cost, ""))
+            rows.append(("   └ 부가세(매출세액)", -vat_out, "사납금의 10/110"))
+            rows.append(("   └ 카드수수료", -card_fee, "사납금의 1.5%"))
+            
+            rows.append(("▼ 연료비(Net)", -net_fuel_cost, "부가세 제외 공급가 기준"))
+            
             rows.append(("▼ 차량 고정비 합계", -total_car_fixed, "감가+보험+유지"))
+            rows.append(("   └ 감가상각비", -c_dep, ""))
+            rows.append(("   └ 보험료", -c_ins, ""))
+            rows.append(("   └ 유지비", -c_maint, ""))
+            
             rows.append(("▼ 인건비 합계", -total_labor_cost, f"매출 대비 {labor_ratio:.1f}%"))
+            rows.append(("   └ 급여 지급액(Gross)", -total_pay, "입력된 총액"))
+            rows.append(("   └ 퇴직금 적립액", -severance, "급여총액 ÷ 12"))
+            rows.append(("   └ 연차수당", -annual_leave, f"{hourly_wage:,}원×{work_time_sc}h×1.25"))
+            rows.append(("   ▼ [상세] 4대보험 계", -total_4ins, ""))
+            rows.append(("      - 국민연금", -ins_pension, f"{rate_pension*100:.2f}%"))
+            rows.append(("      - 건강보험", -ins_health, f"{rate_health*100:.3f}%"))
+            rows.append(("      - 장기요양", -ins_care, f"건보료의 {rate_care_ratio*100:.2f}%"))
+            rows.append(("      - 고용보험", -ins_emp, f"{(rate_emp_unemp+rate_emp_stabil)*100:.2f}%"))
+            rows.append(("      - 산재보험", -ins_sanjae, f"{rate_sanjae*100:.2f}%"))
+            
             rows.append(("▼ 공통 운영비 합계", -cost_overhead, ""))
+            rows.append(("   └ 차고지 임대료", -(net_rent_cost/total_drivers), ""))
+            rows.append(("   └ 관리직원 급여", -(net_admin_salary/total_drivers), ""))
             if total_leakage_cost > 0:
                 rows.append(("   └ ⚠️ 차량 유휴비용", -(total_leakage_cost/total_drivers), f"총 {int(total_leakage_cost):,}원 배분"))
+            
             rows.append(("■ 최종 영업이익", profit_person, "매출 - 비용합계"))
             debug_rows[f"{sc_data['name']} - {t_name}"] = rows
 
@@ -411,17 +438,14 @@ if st.session_state.scenarios:
                 else: return ['background-color: white; color: #2980b9'] * len(row)
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=800)
 
-    # [수정된 AI 탭 - 불필요한 메시지 제거]
     with tab5:
-        st.subheader("🤖 AI 경영 컨설턴트") # (Powered by Gemini 삭제)
+        st.subheader("🤖 AI 경영 컨설턴트")
         st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
         
-        # 1. API 키 확인 (Secrets vs 입력창)
         secret_key = get_api_key()
         user_key = None
         
         if secret_key:
-            # st.success 메시지 삭제 (조용히 키 할당)
             final_api_key = secret_key
         else:
             st.info("💡 등록된 시스템 키가 없습니다. 개인 API Key를 입력해주세요.")
@@ -434,7 +458,6 @@ if st.session_state.scenarios:
             else:
                 try:
                     today_date = datetime.now().strftime("%Y년 %m월 %d일")
-                    
                     context_info = f"""
                     [기초 환경 데이터]
                     - 현재 총 기사 수: {total_drivers}명 / 총 차량 대수: {n_cars}대
@@ -443,7 +466,6 @@ if st.session_state.scenarios:
                     - 차량 1대당 월 고정비(감가+보험+유지): 약 {int(car_fixed_cost_monthly):,}원
                     - 월 총 고정비(임대료+관리비+유휴차량비용): 약 {int(total_overhead_sum):,}원
                     - 1인당 배부된 월 공통비: {int(cost_overhead):,}원
-                    
                     [시나리오별 상세 결과]
                     """
                     for res in all_results_data:
@@ -454,17 +476,14 @@ if st.session_state.scenarios:
                     prompt = f"""
                     당신은 노련한 '택시 회사 경영 전문 컨설턴트'입니다.
                     아래 데이터(오늘 날짜: {today_date})를 바탕으로 정밀한 경영 분석 보고서를 작성하세요.
-
                     [분석할 데이터]
                     {context_info}
-
                     [작성 목차]
                     1. 🏆 최적 시나리오 선정 및 이유
                     2. ⛽ 연료비 민감도 분석 (10% 상승 시 영향)
                     3. 👥 인력 운영 전략 (일차 vs 교대, 유휴 차량 최소화 방안)
                     4. 📉 손익분기점(BEP) 추정 (최소 기사 수)
                     5. 💡 최종 경영 제언 (구체적 실행 전략)
-
                     톤앤매너: 전문적이고 냉철하게, 한국어로 작성.
                     """
                     
@@ -473,9 +492,8 @@ if st.session_state.scenarios:
                         if "오류" in response_text:
                             st.error(response_text)
                         else:
-                            st.success("✅ 심층 분석 완료!") # 모델명 표시 제거
+                            st.success("✅ 심층 분석 완료!")
                             st.markdown(response_text)
-                    
                 except Exception as e:
                     st.error(f"AI 오류: {e}")
 
