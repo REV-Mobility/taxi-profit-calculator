@@ -10,7 +10,7 @@ import google.generativeai as genai
 # ---------------------------------------------------------
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
-# CSS: 노란색 하이라이트 디자인 + 파일 업로더 한글화
+# CSS: 디자인 및 한글 폰트 최적화
 st.markdown("""
 <style>
     div[data-baseweb="input"] {
@@ -33,6 +33,7 @@ st.markdown("""
         font-weight: bold !important;
         font-size: 16px !important;
     }
+    /* 파일 업로더 한글화 */
     section[data-testid="stFileUploaderDropzone"] > div > div > small {
         display: none !important;
     }
@@ -68,20 +69,22 @@ def load_data_callback():
         except Exception as e:
             st.error(f"데이터 파일 읽기 실패: {e}")
 
-# AI 모델 탐색 함수
+# [수정] AI 모델 호출 함수 (구형 모델 제거)
 def get_ai_response(api_key, prompt):
     genai.configure(api_key=api_key)
-    candidate_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
-    last_error = None
-    for model_name in candidate_models:
+    # 최신 모델만 시도 (구형 gemini-pro 제거하여 404 방지)
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        # 1.5-flash 실패 시 1.5-pro 시도
         try:
-            model = genai.GenerativeModel(model_name)
+            model = genai.GenerativeModel('gemini-1.5-pro')
             response = model.generate_content(prompt)
-            return response.text, model_name 
-        except Exception as e:
-            last_error = e
-            continue 
-    raise last_error
+            return response.text
+        except Exception as e2:
+            raise e # 최신 모델 둘 다 안 되면 에러 발생 (라이브러리 버전 문제임)
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
@@ -199,7 +202,7 @@ st.markdown("---")
 st.header("3. 상세 검증 및 분석")
 
 if st.session_state.scenarios:
-    # --- 유휴 차량 비용 로직 (v3.1) ---
+    # --- 유휴 차량 비용 로직 ---
     net_rent_cost = rent_cost / 1.1
     net_admin_salary = admin_salary_total
     
@@ -440,13 +443,13 @@ if st.session_state.scenarios:
                 else: return ['background-color: white; color: #2980b9'] * len(row)
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=800)
 
-    # [수정된 AI 컨설팅 탭 - Deep Analysis Prompt]
     with tab5:
         st.subheader("🤖 AI 경영 컨설턴트 (Powered by Gemini)")
-        st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략, 손익분기점, 연료 민감도**를 심층 분석합니다.")
+        st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
         
         with st.expander("ℹ️ AI 라이브러리 버전 확인"):
             st.write(f"현재 설치된 버전: **{genai.__version__}**")
+            st.caption("※ 0.7.0 이상 버전이 필요합니다.")
             
         api_key = st.text_input("Google API Key를 입력하세요", type="password")
         
@@ -504,15 +507,13 @@ if st.session_state.scenarios:
                     톤앤매너: 전문적이고 냉철하게, 하지만 경영자를 설득하는 부드러운 어조로 한국어로 작성해 주세요.
                     """
                     
-                    # 3. AI 호출
-                    response_text, model_name = get_ai_response(api_key, prompt)
-                    
-                    st.success(f"✅ 심층 분석 완료! (모델: {model_name})")
-                    st.markdown(response_text)
+                    with st.spinner("AI가 데이터를 분석 중입니다..."):
+                        response_text = get_ai_response(api_key, prompt)
+                        st.markdown(response_text)
                     
                 except Exception as e:
                     st.error(f"AI 오류: {e}")
-                    st.info("💡 팁: requirements.txt 버전을 확인해 주세요.")
+                    st.info("💡 해결 방법: [Manage app] -> [Reboot app]을 눌러 서버를 재시작해 보세요.")
 
 else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
