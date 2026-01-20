@@ -6,14 +6,13 @@ import json
 import google.generativeai as genai
 from datetime import datetime
 import io
-import time
 
 # ---------------------------------------------------------
 # 설정 및 유틸리티
 # ---------------------------------------------------------
 st.set_page_config(page_title="택시회사 급여 수익성 분석툴 with 레브모빌리티", layout="wide")
 
-# CSS: 디자인 최적화 (노란색 입력창, 한글 업로더)
+# CSS: 디자인 최적화
 st.markdown("""
 <style>
     div[data-baseweb="input"] {
@@ -70,38 +69,46 @@ def load_data_callback():
         except Exception as e:
             st.error(f"데이터 파일 읽기 실패: {e}")
 
-# ---------------------------------------------------------
-# [롤백] 단일 API Key 처리 및 스트리밍 함수
-# ---------------------------------------------------------
+# API Key 처리 로직
 def get_api_key():
-    # Secrets에서 GOOGLE_API_KEY 하나만 찾습니다.
     if "GOOGLE_API_KEY" in st.secrets:
         return st.secrets["GOOGLE_API_KEY"]
     return None
 
-def stream_response(api_key, prompt):
+def generate_analysis(api_key, prompt):
     genai.configure(api_key=api_key)
-    
-    # 모델 자동 탐색 (Flash -> Pro -> Legacy)
-    valid_model = 'gemini-1.5-flash'
+    valid_model_name = None
     try:
-        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        if 'models/gemini-1.5-flash' in models: valid_model = 'gemini-1.5-flash'
-        elif 'models/gemini-1.5-pro' in models: valid_model = 'gemini-1.5-pro'
-        elif 'models/gemini-pro' in models: valid_model = 'gemini-pro'
-    except:
-        pass 
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+        
+        priority_list = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']
+        for p_model in priority_list:
+            if p_model in available_models:
+                valid_model_name = p_model
+                break
+        if not valid_model_name and available_models:
+            valid_model_name = available_models[0]
+    except Exception:
+        valid_model_name = 'gemini-pro'
 
-    model = genai.GenerativeModel(valid_model)
-    # 스트리밍 모드로 호출
-    response = model.generate_content(prompt, stream=True)
-    return response
+    if not valid_model_name:
+        return "사용 가능한 AI 모델을 찾을 수 없습니다.", "Unknown"
+
+    try:
+        model = genai.GenerativeModel(valid_model_name)
+        response = model.generate_content(prompt)
+        return response.text, valid_model_name
+    except Exception as e:
+        return f"AI 호출 오류: {str(e)}", valid_model_name
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 사이드바 & 입력 로직 (그대로 유지)
+# 사이드바 & 입력 로직
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("1. 회사 기초 환경 설정")
@@ -270,15 +277,19 @@ if st.session_state.scenarios:
             if taxable_pay < 0: taxable_pay = 0
             severance = total_pay / 12 
             annual_leave = hourly_wage * work_time_sc * 1.25
+            
             ins_pension = taxable_pay * rate_pension
             ins_health = taxable_pay * rate_health
             ins_care = ins_health * rate_care_ratio
             ins_emp = taxable_pay * (rate_emp_unemp + rate_emp_stabil)
             ins_sanjae = total_pay * rate_sanjae
+            
             total_4ins = ins_pension + ins_health + ins_care + ins_emp + ins_sanjae
             total_labor_cost = total_pay + severance + annual_leave + total_4ins
+            
             total_cost_person = (vat_out + card_fee + net_fuel_cost + total_car_fixed + total_labor_cost + cost_overhead)
             profit_person = monthly_sanap - total_cost_person
+            
             group_profit = profit_person * count
             total_profit += group_profit
             total_revenue += (monthly_sanap * count)
@@ -295,14 +306,18 @@ if st.session_state.scenarios:
             
             rows = []
             rows.append(("1. 월 매출(사납금)", monthly_sanap, f"{sanap:,}원 × {full_days}일"))
+            
             rows.append(("▼ 매출 공제(세금/수수료)", -(vat_out + card_fee), ""))
             rows.append(("   └ 부가세(매출세액)", -vat_out, "사납금의 10/110"))
             rows.append(("   └ 카드수수료", -card_fee, "사납금의 1.5%"))
+            
             rows.append(("▼ 연료비(Net)", -net_fuel_cost, "부가세 제외 공급가 기준"))
+            
             rows.append(("▼ 차량 고정비 합계", -total_car_fixed, "감가+보험+유지"))
             rows.append(("   └ 감가상각비", -c_dep, ""))
             rows.append(("   └ 보험료", -c_ins, ""))
             rows.append(("   └ 유지비", -c_maint, ""))
+            
             rows.append(("▼ 인건비 합계", -total_labor_cost, f"매출 대비 {labor_ratio:.1f}%"))
             rows.append(("   └ 급여 지급액(Gross)", -total_pay, "입력된 총액"))
             rows.append(("   └ 퇴직금 적립액", -severance, "급여총액 ÷ 12"))
@@ -313,11 +328,13 @@ if st.session_state.scenarios:
             rows.append(("      - 장기요양", -ins_care, f"건보료의 {rate_care_ratio*100:.2f}%"))
             rows.append(("      - 고용보험", -ins_emp, f"{(rate_emp_unemp+rate_emp_stabil)*100:.2f}%"))
             rows.append(("      - 산재보험", -ins_sanjae, f"{rate_sanjae*100:.2f}%"))
+            
             rows.append(("▼ 공통 운영비 합계", -cost_overhead, ""))
             rows.append(("   └ 차고지 임대료", -(net_rent_cost/total_drivers), ""))
             rows.append(("   └ 관리직원 급여", -(net_admin_salary/total_drivers), ""))
             if total_leakage_cost > 0:
                 rows.append(("   └ ⚠️ 차량 유휴비용", -(total_leakage_cost/total_drivers), f"총 {int(total_leakage_cost):,}원 배분"))
+            
             rows.append(("■ 최종 영업이익", profit_person, "매출 - 비용합계"))
             debug_rows[f"{sc_data['name']} - {t_name}"] = rows
 
@@ -384,9 +401,11 @@ if st.session_state.scenarios:
                 "이익률": res['margin']
             })
         df_summary = pd.DataFrame(summary_rows)
+        
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df_summary.to_excel(writer, index=False, sheet_name='Summary')
+        
         c1, c2 = st.columns([4, 1])
         c1.dataframe(df_summary.style.format({
                 "총 매출 (월)": "{:,.0f}", 
@@ -395,7 +414,13 @@ if st.session_state.scenarios:
                 "인건비율": "{:.1f}%", 
                 "이익률": "{:.1f}%"
             }).background_gradient(subset=["영업이익 (월)", "이익률"], cmap="Greens").background_gradient(subset=["총 인건비 (월)", "인건비율"], cmap="Reds"), use_container_width=True)
-        c2.download_button(label="📥 엑셀 다운로드", data=buffer.getvalue(), file_name=f"taxi_analysis_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        
+        c2.download_button(
+            label="📥 엑셀 다운로드",
+            data=buffer.getvalue(),
+            file_name=f"taxi_analysis_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     with tab3:
         st.subheader("🧐 근무 형태별 수익성 상세")
@@ -424,6 +449,7 @@ if st.session_state.scenarios:
                 elif "▼" in row["항목"]: return ['background-color: #f1f2f6; font-weight: bold; color: #2c3e50'] * len(row)
                 elif row["금액(원)"] < 0: return ['background-color: white; color: #c0392b'] * len(row)
                 else: return ['background-color: white; color: #2980b9'] * len(row)
+            # [수정] 높이를 800 -> 1200으로 변경
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=1200)
 
     with tab5:
@@ -432,7 +458,6 @@ if st.session_state.scenarios:
         
         secret_key = get_api_key()
         user_key = None
-        final_api_key = None
         
         if secret_key:
             final_api_key = secret_key
@@ -477,16 +502,12 @@ if st.session_state.scenarios:
                     """
                     
                     with st.spinner("AI가 데이터를 분석 중입니다..."):
-                        response_stream = stream_response(final_api_key, prompt)
-                        result_container = st.empty()
-                        full_text = ""
-                        for chunk in response_stream:
-                            if chunk.text:
-                                full_text += chunk.text
-                                result_container.markdown(full_text + "▌")
-                        result_container.markdown(full_text)
-                        st.success("✅ 심층 분석 완료!")
-                        
+                        response_text, model_name = generate_analysis(final_api_key, prompt)
+                        if "오류" in response_text:
+                            st.error(response_text)
+                        else:
+                            st.success("✅ 심층 분석 완료!")
+                            st.markdown(response_text)
                 except Exception as e:
                     st.error(f"AI 오류: {e}")
 
