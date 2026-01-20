@@ -3,3 +3,4 @@ pandas
 plotly
 google-generativeai>=0.7.0
 openpyxl
+matplotlib
