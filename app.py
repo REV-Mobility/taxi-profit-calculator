@@ -6,7 +6,7 @@ import json
 import google.generativeai as genai
 from datetime import datetime
 import io
-import time # 딜레이를 위해 추가
+import time
 
 # ---------------------------------------------------------
 # 설정 및 유틸리티
@@ -79,7 +79,7 @@ def get_api_keys():
         keys.append(st.secrets["GOOGLE_API_KEY"])
     return keys
 
-# [핵심 수정] 에러 상세 리턴 및 안전 설정(Safety Settings) 적용
+# 수동 스트리밍 함수 (안전 필터 해제 포함)
 def stream_response_manual(api_key, prompt):
     genai.configure(api_key=api_key)
     
@@ -89,38 +89,23 @@ def stream_response_manual(api_key, prompt):
         if 'models/gemini-1.5-flash' in models: valid_model = 'gemini-1.5-flash'
         elif 'models/gemini-1.5-pro' in models: valid_model = 'gemini-1.5-pro'
         elif 'models/gemini-pro' in models: valid_model = 'gemini-pro'
-    except Exception as e:
-        # 모델 목록 조회 실패 시에도 진행 (API 키 문제일 수 있으므로 호출에서 확인)
+    except:
         pass 
 
     model = genai.GenerativeModel(valid_model)
     
-    # [안전 설정] 재무 데이터 오인 차단 (BLOCK_NONE)
     safety_settings = [
-        {
-            "category": "HARM_CATEGORY_HARASSMENT",
-            "threshold": "BLOCK_NONE"
-        },
-        {
-            "category": "HARM_CATEGORY_HATE_SPEECH",
-            "threshold": "BLOCK_NONE"
-        },
-        {
-            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            "threshold": "BLOCK_NONE"
-        },
-        {
-            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-            "threshold": "BLOCK_NONE"
-        },
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
     ]
     
-    # 스트리밍 요청
     try:
         response = model.generate_content(prompt, stream=True, safety_settings=safety_settings)
-        return response, valid_model, None # 성공 시 에러 없음
+        return response, valid_model, None
     except Exception as e:
-        return None, valid_model, str(e) # 실패 시 에러 메시지 반환
+        return None, valid_model, str(e)
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
@@ -324,14 +309,18 @@ if st.session_state.scenarios:
             
             rows = []
             rows.append(("1. 월 매출(사납금)", monthly_sanap, f"{sanap:,}원 × {full_days}일"))
+            
             rows.append(("▼ 매출 공제(세금/수수료)", -(vat_out + card_fee), ""))
             rows.append(("   └ 부가세(매출세액)", -vat_out, "사납금의 10/110"))
             rows.append(("   └ 카드수수료", -card_fee, "사납금의 1.5%"))
+            
             rows.append(("▼ 연료비(Net)", -net_fuel_cost, "부가세 제외 공급가 기준"))
+            
             rows.append(("▼ 차량 고정비 합계", -total_car_fixed, "감가+보험+유지"))
             rows.append(("   └ 감가상각비", -c_dep, ""))
             rows.append(("   └ 보험료", -c_ins, ""))
             rows.append(("   └ 유지비", -c_maint, ""))
+            
             rows.append(("▼ 인건비 합계", -total_labor_cost, f"매출 대비 {labor_ratio:.1f}%"))
             rows.append(("   └ 급여 지급액(Gross)", -total_pay, "입력된 총액"))
             rows.append(("   └ 퇴직금 적립액", -severance, "급여총액 ÷ 12"))
@@ -342,11 +331,13 @@ if st.session_state.scenarios:
             rows.append(("      - 장기요양", -ins_care, f"건보료의 {rate_care_ratio*100:.2f}%"))
             rows.append(("      - 고용보험", -ins_emp, f"{(rate_emp_unemp+rate_emp_stabil)*100:.2f}%"))
             rows.append(("      - 산재보험", -ins_sanjae, f"{rate_sanjae*100:.2f}%"))
+            
             rows.append(("▼ 공통 운영비 합계", -cost_overhead, ""))
             rows.append(("   └ 차고지 임대료", -(net_rent_cost/total_drivers), ""))
             rows.append(("   └ 관리직원 급여", -(net_admin_salary/total_drivers), ""))
             if total_leakage_cost > 0:
                 rows.append(("   └ ⚠️ 차량 유휴비용", -(total_leakage_cost/total_drivers), f"총 {int(total_leakage_cost):,}원 배분"))
+            
             rows.append(("■ 최종 영업이익", profit_person, "매출 - 비용합계"))
             debug_rows[f"{sc_data['name']} - {t_name}"] = rows
 
@@ -463,7 +454,7 @@ if st.session_state.scenarios:
                 else: return ['background-color: white; color: #2980b9'] * len(row)
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=1200)
 
-    # [수정된 AI 탭 - 스트리밍 + 로테이션 + 딜레이]
+    # [수정된 AI 탭 - 상태 로그(Status) 적용]
     with tab5:
         st.subheader("🤖 AI 경영 컨설턴트")
         st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
@@ -514,40 +505,45 @@ if st.session_state.scenarios:
                 톤앤매너: 전문적이고 냉철하게, 한국어로 작성.
                 """
                 
-                success = False
-                result_container = st.empty()
-                last_error_msg = ""
-                
-                # 키 로테이션 루프
-                for i, api_key in enumerate(final_key_list):
-                    try:
-                        # 1초 딜레이 (분당 제한 회피)
-                        if i > 0: time.sleep(1)
+                # [상태 로그 UI 추가]
+                with st.status("🚀 AI 분석 서버에 연결 중...", expanded=True) as status:
+                    success = False
+                    result_container = st.empty()
+                    last_error_msg = ""
+                    
+                    for i, api_key in enumerate(final_key_list):
+                        status.write(f"🔄 [시도 {i+1}/{len(final_key_list)}] API Key 연결 중...")
+                        if i > 0: time.sleep(1) # 딜레이
                         
-                        response_stream, model_name, err = stream_response_manual(api_key, prompt)
-                        
-                        if err:
-                            last_error_msg = err
-                            continue # 다음 키로 이동
-                        
-                        # 스트리밍 출력
-                        full_text = ""
-                        for chunk in response_stream:
-                            if chunk.text:
-                                full_text += chunk.text
-                                result_container.markdown(full_text + "▌")
-                        
-                        result_container.markdown(full_text)
-                        st.success("✅ 심층 분석 완료!")
-                        success = True
-                        break # 성공하면 루프 종료
-                        
-                    except Exception as e:
-                        last_error_msg = str(e)
-                        continue
-                
-                if not success:
-                    st.error(f"모든 API Key가 실패했습니다. 마지막 오류: {last_error_msg}")
+                        try:
+                            response_stream, model_name, err = stream_response_manual(api_key, prompt)
+                            
+                            if err:
+                                status.write(f"❌ 실패: {err}")
+                                last_error_msg = err
+                                continue
+                            
+                            status.update(label="✅ 연결 성공! 보고서를 작성합니다.", state="complete", expanded=False)
+                            
+                            # 스트리밍 출력
+                            full_text = ""
+                            for chunk in response_stream:
+                                if chunk.text:
+                                    full_text += chunk.text
+                                    result_container.markdown(full_text + "▌")
+                            
+                            result_container.markdown(full_text)
+                            st.success("✅ 분석이 완료되었습니다.")
+                            success = True
+                            break
+                            
+                        except Exception as e:
+                            status.write(f"❌ 오류: {str(e)}")
+                            continue
+                    
+                    if not success:
+                        status.update(label="⚠️ 분석 실패", state="error")
+                        st.error(f"모든 키 연결에 실패했습니다. 마지막 오류: {last_error_msg}")
 
 else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
