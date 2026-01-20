@@ -69,15 +69,27 @@ def load_data_callback():
         except Exception as e:
             st.error(f"데이터 파일 읽기 실패: {e}")
 
-# API Key 처리 로직
-def get_api_key():
-    if "GOOGLE_API_KEY" in st.secrets:
-        return st.secrets["GOOGLE_API_KEY"]
-    return None
+# ---------------------------------------------------------
+# [수정] API Key 목록 가져오기 (리스트 반환)
+# ---------------------------------------------------------
+def get_api_keys():
+    keys = []
+    # 1. secrets에 리스트로 저장된 경우 (GOOGLE_API_KEYS = ["key1", "key2"])
+    if "GOOGLE_API_KEYS" in st.secrets:
+        keys.extend(st.secrets["GOOGLE_API_KEYS"])
+    
+    # 2. secrets에 단일 키로 저장된 경우 (구버전 호환)
+    elif "GOOGLE_API_KEY" in st.secrets:
+        keys.append(st.secrets["GOOGLE_API_KEY"])
+        
+    return keys
 
-def generate_analysis(api_key, prompt):
+# 모델 생성 및 호출 함수 (단일 키 시도용)
+def try_generate_with_key(api_key, prompt):
     genai.configure(api_key=api_key)
     valid_model_name = None
+    
+    # 모델 탐색
     try:
         available_models = []
         for m in genai.list_models():
@@ -92,23 +104,24 @@ def generate_analysis(api_key, prompt):
         if not valid_model_name and available_models:
             valid_model_name = available_models[0]
     except Exception:
-        valid_model_name = 'gemini-pro'
+        valid_model_name = 'gemini-pro' # list_models 실패 시 fallback
 
     if not valid_model_name:
-        return "사용 가능한 AI 모델을 찾을 수 없습니다.", "Unknown"
+        return None, "모델 탐색 실패", "Unknown"
 
+    # 실제 호출
     try:
         model = genai.GenerativeModel(valid_model_name)
         response = model.generate_content(prompt)
-        return response.text, valid_model_name
+        return True, response.text, valid_model_name
     except Exception as e:
-        return f"AI 호출 오류: {str(e)}", valid_model_name
+        return False, str(e), valid_model_name
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 사이드바 & 입력 로직
+# 사이드바 & 입력 로직 (기존 유지)
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("1. 회사 기초 환경 설정")
@@ -277,7 +290,6 @@ if st.session_state.scenarios:
             if taxable_pay < 0: taxable_pay = 0
             severance = total_pay / 12 
             annual_leave = hourly_wage * work_time_sc * 1.25
-            
             ins_pension = taxable_pay * rate_pension
             ins_health = taxable_pay * rate_health
             ins_care = ins_health * rate_care_ratio
@@ -306,18 +318,14 @@ if st.session_state.scenarios:
             
             rows = []
             rows.append(("1. 월 매출(사납금)", monthly_sanap, f"{sanap:,}원 × {full_days}일"))
-            
             rows.append(("▼ 매출 공제(세금/수수료)", -(vat_out + card_fee), ""))
             rows.append(("   └ 부가세(매출세액)", -vat_out, "사납금의 10/110"))
             rows.append(("   └ 카드수수료", -card_fee, "사납금의 1.5%"))
-            
             rows.append(("▼ 연료비(Net)", -net_fuel_cost, "부가세 제외 공급가 기준"))
-            
             rows.append(("▼ 차량 고정비 합계", -total_car_fixed, "감가+보험+유지"))
             rows.append(("   └ 감가상각비", -c_dep, ""))
             rows.append(("   └ 보험료", -c_ins, ""))
             rows.append(("   └ 유지비", -c_maint, ""))
-            
             rows.append(("▼ 인건비 합계", -total_labor_cost, f"매출 대비 {labor_ratio:.1f}%"))
             rows.append(("   └ 급여 지급액(Gross)", -total_pay, "입력된 총액"))
             rows.append(("   └ 퇴직금 적립액", -severance, "급여총액 ÷ 12"))
@@ -449,29 +457,34 @@ if st.session_state.scenarios:
                 elif "▼" in row["항목"]: return ['background-color: #f1f2f6; font-weight: bold; color: #2c3e50'] * len(row)
                 elif row["금액(원)"] < 0: return ['background-color: white; color: #c0392b'] * len(row)
                 else: return ['background-color: white; color: #2980b9'] * len(row)
-            # [수정] 높이를 800 -> 1200으로 변경
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=1200)
 
+    # [수정된 AI 탭 - API 키 자동 감지 및 로테이션]
     with tab5:
         st.subheader("🤖 AI 경영 컨설턴트")
         st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
         
-        secret_key = get_api_key()
+        # 1. API 키 목록 확인 (Secrets vs 입력창)
+        system_keys = get_api_keys()
         user_key = None
         
-        if secret_key:
-            final_api_key = secret_key
+        final_key_list = []
+        
+        if system_keys:
+            final_key_list = system_keys
         else:
             st.info("💡 등록된 시스템 키가 없습니다. 개인 API Key를 입력해주세요.")
             user_key = st.text_input("Google API Key", type="password")
-            final_api_key = user_key
+            if user_key:
+                final_key_list = [user_key]
         
         if st.button("AI 분석 요청하기"):
-            if not final_api_key:
-                st.error("API Key가 없습니다. 키를 입력하거나 관리자에게 문의하세요.")
+            if not final_key_list:
+                st.error("사용 가능한 API Key가 없습니다.")
             else:
                 try:
                     today_date = datetime.now().strftime("%Y년 %m월 %d일")
+                    
                     context_info = f"""
                     [기초 환경 데이터]
                     - 현재 총 기사 수: {total_drivers}명 / 총 차량 대수: {n_cars}대
@@ -480,6 +493,7 @@ if st.session_state.scenarios:
                     - 차량 1대당 월 고정비(감가+보험+유지): 약 {int(car_fixed_cost_monthly):,}원
                     - 월 총 고정비(임대료+관리비+유휴차량비용): 약 {int(total_overhead_sum):,}원
                     - 1인당 배부된 월 공통비: {int(cost_overhead):,}원
+                    
                     [시나리오별 상세 결과]
                     """
                     for res in all_results_data:
@@ -490,26 +504,41 @@ if st.session_state.scenarios:
                     prompt = f"""
                     당신은 노련한 '택시 회사 경영 전문 컨설턴트'입니다.
                     아래 데이터(오늘 날짜: {today_date})를 바탕으로 정밀한 경영 분석 보고서를 작성하세요.
+
                     [분석할 데이터]
                     {context_info}
+
                     [작성 목차]
                     1. 🆚 **시나리오별 정밀 비교 분석** (가장 중요: 시나리오 간 장단점 대조)
                     2. ⛽ 연료비 민감도 분석 (10% 상승 시 영향)
                     3. 👥 인력 운영 전략 (일차 vs 교대, 유휴 차량 최소화 방안)
                     4. 📉 손익분기점(BEP) 추정 (최소 기사 수)
                     5. 💡 최종 경영 제언 (구체적 실행 전략)
+
                     톤앤매너: 전문적이고 냉철하게, 한국어로 작성.
                     """
                     
                     with st.spinner("AI가 데이터를 분석 중입니다..."):
-                        response_text, model_name = generate_analysis(final_api_key, prompt)
-                        if "오류" in response_text:
-                            st.error(response_text)
-                        else:
-                            st.success("✅ 심층 분석 완료!")
-                            st.markdown(response_text)
+                        # [핵심] 키 로테이션 로직
+                        success = False
+                        last_error_msg = ""
+                        
+                        for api_key in final_key_list:
+                            is_ok, result, model_name = try_generate_with_key(api_key, prompt)
+                            if is_ok:
+                                st.success("✅ 심층 분석 완료!")
+                                st.markdown(result)
+                                success = True
+                                break
+                            else:
+                                last_error_msg = result
+                                continue # 다음 키 시도
+                        
+                        if not success:
+                            st.error(f"모든 API Key가 실패했습니다. 마지막 오류: {last_error_msg}")
+                            
                 except Exception as e:
-                    st.error(f"AI 오류: {e}")
+                    st.error(f"시스템 오류: {e}")
 
 else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
