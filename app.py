@@ -6,7 +6,7 @@ import json
 import google.generativeai as genai
 from datetime import datetime
 import io
-import time
+import time # 딜레이를 위해 추가
 
 # ---------------------------------------------------------
 # 설정 및 유틸리티
@@ -79,25 +79,48 @@ def get_api_keys():
         keys.append(st.secrets["GOOGLE_API_KEY"])
     return keys
 
-# [핵심 수정] 수동 스트리밍 함수 (가장 안전한 방식)
+# [핵심 수정] 에러 상세 리턴 및 안전 설정(Safety Settings) 적용
 def stream_response_manual(api_key, prompt):
     genai.configure(api_key=api_key)
     
-    # 1. 모델 자동 선택 (Flash 우선)
-    valid_model = 'gemini-1.5-flash' # 기본값
+    valid_model = 'gemini-1.5-flash'
     try:
         models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         if 'models/gemini-1.5-flash' in models: valid_model = 'gemini-1.5-flash'
         elif 'models/gemini-1.5-pro' in models: valid_model = 'gemini-1.5-pro'
         elif 'models/gemini-pro' in models: valid_model = 'gemini-pro'
-    except:
-        pass # 에러나면 그냥 flash 시도
+    except Exception as e:
+        # 모델 목록 조회 실패 시에도 진행 (API 키 문제일 수 있으므로 호출에서 확인)
+        pass 
 
     model = genai.GenerativeModel(valid_model)
     
-    # 2. 스트리밍 요청
-    response = model.generate_content(prompt, stream=True)
-    return response, valid_model
+    # [안전 설정] 재무 데이터 오인 차단 (BLOCK_NONE)
+    safety_settings = [
+        {
+            "category": "HARM_CATEGORY_HARASSMENT",
+            "threshold": "BLOCK_NONE"
+        },
+        {
+            "category": "HARM_CATEGORY_HATE_SPEECH",
+            "threshold": "BLOCK_NONE"
+        },
+        {
+            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            "threshold": "BLOCK_NONE"
+        },
+        {
+            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+            "threshold": "BLOCK_NONE"
+        },
+    ]
+    
+    # 스트리밍 요청
+    try:
+        response = model.generate_content(prompt, stream=True, safety_settings=safety_settings)
+        return response, valid_model, None # 성공 시 에러 없음
+    except Exception as e:
+        return None, valid_model, str(e) # 실패 시 에러 메시지 반환
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
@@ -438,10 +461,9 @@ if st.session_state.scenarios:
                 elif "▼" in row["항목"]: return ['background-color: #f1f2f6; font-weight: bold; color: #2c3e50'] * len(row)
                 elif row["금액(원)"] < 0: return ['background-color: white; color: #c0392b'] * len(row)
                 else: return ['background-color: white; color: #2980b9'] * len(row)
-            # 높이 1200px로 증가
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=1200)
 
-    # [수정된 AI 탭 - 수동 스트리밍 적용]
+    # [수정된 AI 탭 - 스트리밍 + 로테이션 + 딜레이]
     with tab5:
         st.subheader("🤖 AI 경영 컨설턴트")
         st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
@@ -493,27 +515,39 @@ if st.session_state.scenarios:
                 """
                 
                 success = False
-                result_container = st.empty() # 결과를 표시할 빈 공간 생성
+                result_container = st.empty()
+                last_error_msg = ""
                 
-                for api_key in final_key_list:
+                # 키 로테이션 루프
+                for i, api_key in enumerate(final_key_list):
                     try:
-                        response_stream, model_name = stream_response_manual(api_key, prompt)
-                        # [핵심] 수동 스트리밍 루프
+                        # 1초 딜레이 (분당 제한 회피)
+                        if i > 0: time.sleep(1)
+                        
+                        response_stream, model_name, err = stream_response_manual(api_key, prompt)
+                        
+                        if err:
+                            last_error_msg = err
+                            continue # 다음 키로 이동
+                        
+                        # 스트리밍 출력
                         full_text = ""
                         for chunk in response_stream:
                             if chunk.text:
                                 full_text += chunk.text
-                                result_container.markdown(full_text + "▌") # 커서 효과
+                                result_container.markdown(full_text + "▌")
                         
-                        result_container.markdown(full_text) # 최종 완료
+                        result_container.markdown(full_text)
                         st.success("✅ 심층 분석 완료!")
                         success = True
-                        break
+                        break # 성공하면 루프 종료
+                        
                     except Exception as e:
-                        continue # 다음 키 시도
+                        last_error_msg = str(e)
+                        continue
                 
                 if not success:
-                    st.error("모든 API Key가 실패했습니다. (사용량 초과 또는 네트워크 오류)")
+                    st.error(f"모든 API Key가 실패했습니다. 마지막 오류: {last_error_msg}")
 
 else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
@@ -538,4 +572,3 @@ with st.sidebar:
                 basic_info[k] = st.session_state[k]
         return json.dumps({"basic_info": basic_info, "scenarios": st.session_state.get('scenarios', [])}, indent=4, ensure_ascii=False)
     st.download_button(label="💾 작업 내용 PC 저장", data=get_current_data(), file_name="taxi_profit_data.json", mime="application/json")
-
