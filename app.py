@@ -280,4 +280,262 @@ if st.session_state.scenarios:
             fuel_liter = fuel * full_days
             net_fuel_cost = fuel_liter * (lpg_price / 1.1)
             c_dep, c_ins, c_maint = get_car_cost_details(d_type)
-            total_car_fixed
+            total_car_fixed = c_dep + c_ins + c_maint
+            total_pay = pay
+            taxable_pay = pay - tf
+            if taxable_pay < 0: taxable_pay = 0
+            severance = total_pay / 12 
+            annual_leave = hourly_wage * work_time_sc * 1.25
+            ins_pension = taxable_pay * rate_pension
+            ins_health = taxable_pay * rate_health
+            ins_care = ins_health * rate_care_ratio
+            ins_emp = taxable_pay * (rate_emp_unemp + rate_emp_stabil)
+            ins_sanjae = total_pay * rate_sanjae
+            total_4ins = ins_pension + ins_health + ins_care + ins_emp + ins_sanjae
+            total_labor_cost = total_pay + severance + annual_leave + total_4ins
+            total_cost_person = (vat_out + card_fee + net_fuel_cost + total_car_fixed + total_labor_cost + cost_overhead)
+            profit_person = monthly_sanap - total_cost_person
+            group_profit = profit_person * count
+            total_profit += group_profit
+            total_revenue += (monthly_sanap * count)
+            total_labor += (total_labor_cost * count)
+            labor_ratio = (total_labor_cost / monthly_sanap * 100) if monthly_sanap > 0 else 0
+            
+            details.append({
+                "근무형태": t_name,
+                "1인 매출": monthly_sanap,
+                "1인 영업이익": profit_person,
+                "1인 인건비": total_labor_cost,
+                "인건비율": labor_ratio
+            })
+            rows = []
+            rows.append(("1. 월 매출(사납금)", monthly_sanap, f"{sanap:,}원 × {full_days}일"))
+            rows.append(("▼ 매출 공제(세금/수수료)", -(vat_out + card_fee), ""))
+            rows.append(("   └ 부가세(매출세액)", -vat_out, "사납금의 10/110"))
+            rows.append(("   └ 카드수수료", -card_fee, "사납금의 1.5%"))
+            rows.append(("▼ 연료비(Net)", -net_fuel_cost, "부가세 제외 공급가 기준"))
+            rows.append(("▼ 차량 고정비 합계", -total_car_fixed, "감가+보험+유지"))
+            rows.append(("   └ 감가상각비", -c_dep, ""))
+            rows.append(("   └ 보험료", -c_ins, ""))
+            rows.append(("   └ 유지비", -c_maint, ""))
+            rows.append(("▼ 인건비 합계", -total_labor_cost, f"매출 대비 {labor_ratio:.1f}%"))
+            rows.append(("   └ 급여 지급액(Gross)", -total_pay, "입력된 총액"))
+            rows.append(("   └ 퇴직금 적립액", -severance, "급여총액 ÷ 12"))
+            rows.append(("   └ 연차수당", -annual_leave, f"{hourly_wage:,}원×{work_time_sc}h×1.25"))
+            rows.append(("   ▼ [상세] 4대보험 계", -total_4ins, ""))
+            rows.append(("      - 국민연금", -ins_pension, f"{rate_pension*100:.2f}%"))
+            rows.append(("      - 건강보험", -ins_health, f"{rate_health*100:.3f}%"))
+            rows.append(("      - 장기요양", -ins_care, f"건보료의 {rate_care_ratio*100:.2f}%"))
+            rows.append(("      - 고용보험", -ins_emp, f"{(rate_emp_unemp+rate_emp_stabil)*100:.2f}%"))
+            rows.append(("      - 산재보험", -ins_sanjae, f"{rate_sanjae*100:.2f}%"))
+            rows.append(("▼ 공통 운영비 합계", -cost_overhead, ""))
+            rows.append(("   └ 차고지 임대료", -(net_rent_cost/total_drivers), ""))
+            rows.append(("   └ 관리직원 급여", -(net_admin_salary/total_drivers), ""))
+            if total_leakage_cost > 0:
+                rows.append(("   └ ⚠️ 차량 유휴비용", -(total_leakage_cost/total_drivers), f"총 {int(total_leakage_cost):,}원 배분"))
+            rows.append(("■ 최종 영업이익", profit_person, "매출 - 비용합계"))
+            debug_rows[f"{sc_data['name']} - {t_name}"] = rows
+
+        profit_margin = (total_profit / total_revenue * 100) if total_revenue > 0 else 0
+        labor_margin = (total_labor / total_revenue * 100) if total_revenue > 0 else 0
+        return {
+            "name": sc_data['name'],
+            "revenue": total_revenue,
+            "profit": total_profit,
+            "labor": total_labor,
+            "margin": profit_margin,
+            "labor_rate": labor_margin,
+            "details": details,
+            "debug": debug_rows
+        }
+
+    all_results_data = [calculate_scenario(sc) for sc in st.session_state.scenarios]
+    global_debug = {}
+    for res in all_results_data:
+        global_debug.update(res['debug'])
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🎛️ 사납금 조정", "🏆 시나리오 비교", "📊 근무형태별 분석", "🧾 상세 계산 검증", "🤖 AI 경영 컨설팅"])
+
+    with tab1:
+        st.subheader("🎛️ 사납금 조정 시뮬레이터 (What-If)")
+        sc_names = [sc['name'] for sc in st.session_state.scenarios]
+        selected_sc_name = st.selectbox("조정할 시나리오 선택", sc_names)
+        selected_sc_idx = sc_names.index(selected_sc_name)
+        origin_sc = st.session_state.scenarios[selected_sc_idx]
+        st.write(f"▼ **'{selected_sc_name}'의 1일 사납금을 조정해 보세요.**")
+        ac1, ac2, ac3, ac4 = st.columns(4)
+        new_day = ac1.number_input("주간 사납금", value=origin_sc['day']['sanap'], step=1000, key=f"sim_day_{selected_sc_idx}")
+        new_night = ac2.number_input("야간 사납금", value=origin_sc['night']['sanap'], step=1000, key=f"sim_night_{selected_sc_idx}")
+        new_shift = ac3.number_input("교대 사납금", value=origin_sc['shift']['sanap'], step=1000, key=f"sim_shift_{selected_sc_idx}")
+        new_daily = ac4.number_input("일차 사납금", value=origin_sc['daily']['sanap'], step=1000, key=f"sim_daily_{selected_sc_idx}")
+        override_map = {'day': new_day, 'night': new_night, 'shift': new_shift, 'daily': new_daily}
+        sim_result = calculate_scenario(origin_sc, override_map)
+        origin_result = all_results_data[selected_sc_idx]
+        st.markdown("##### 📊 시뮬레이션 결과")
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        mc1.metric("월 총 매출", f"{sim_result['revenue']:,.0f} 원", f"{sim_result['revenue'] - origin_result['revenue']:,.0f} 원")
+        mc2.metric("월 영업이익", f"{sim_result['profit']:,.0f} 원", f"{sim_result['profit'] - origin_result['profit']:,.0f} 원")
+        mc3.metric("영업이익률", f"{sim_result['margin']:.2f} %", f"{sim_result['margin'] - origin_result['margin']:.2f} %p")
+        mc4.metric("인건비율", f"{sim_result['labor_rate']:.2f} %", f"{sim_result['labor_rate'] - origin_result['labor_rate']:.2f} %p", delta_color="inverse")
+        st.markdown("---")
+        if st.button("💾 변경된 사납금으로 이 시나리오 업데이트"):
+            st.session_state.scenarios[selected_sc_idx]['day']['sanap'] = new_day
+            st.session_state.scenarios[selected_sc_idx]['night']['sanap'] = new_night
+            st.session_state.scenarios[selected_sc_idx]['shift']['sanap'] = new_shift
+            st.session_state.scenarios[selected_sc_idx]['daily']['sanap'] = new_daily
+            st.success("✅ 업데이트 완료!")
+            st.rerun()
+
+    with tab2:
+        st.subheader("🏆 시나리오 총괄 비교표")
+        summary_rows = []
+        for res in all_results_data:
+            summary_rows.append({
+                "시나리오명": res['name'],
+                "총 매출 (월)": res['revenue'],
+                "총 인건비 (월)": res['labor'],
+                "영업이익 (월)": res['profit'],
+                "인건비율": res['labor_rate'],
+                "이익률": res['margin']
+            })
+        df_summary = pd.DataFrame(summary_rows)
+        
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_summary.to_excel(writer, index=False, sheet_name='Summary')
+        
+        c1, c2 = st.columns([4, 1])
+        c1.dataframe(df_summary.style.format({
+                "총 매출 (월)": "{:,.0f}", 
+                "총 인건비 (월)": "{:,.0f}", 
+                "영업이익 (월)": "{:,.0f}", 
+                "인건비율": "{:.1f}%", 
+                "이익률": "{:.1f}%"
+            }).background_gradient(subset=["영업이익 (월)", "이익률"], cmap="Greens").background_gradient(subset=["총 인건비 (월)", "인건비율"], cmap="Reds"), use_container_width=True)
+        
+        c2.download_button(
+            label="📥 엑셀 다운로드",
+            data=buffer.getvalue(),
+            file_name=f"taxi_analysis_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    with tab3:
+        st.subheader("🧐 근무 형태별 수익성 상세")
+        if all_results_data:
+            target_sc = st.selectbox("분석할 시나리오", sc_names, key="tab3_sel")
+            target_res = next(r for r in all_results_data if r['name'] == target_sc)
+            df_detail = pd.DataFrame(target_res['details'])
+            c1, c2 = st.columns(2)
+            fig_bar = go.Figure()
+            fig_bar.add_trace(go.Bar(name='1인 매출', x=df_detail['근무형태'], y=df_detail['1인 매출'], text=df_detail['1인 매출'], texttemplate='%{text:,.0f}'))
+            fig_bar.add_trace(go.Bar(name='1인 이익', x=df_detail['근무형태'], y=df_detail['1인 영업이익'], text=df_detail['1인 영업이익'], texttemplate='%{text:,.0f}'))
+            fig_bar.update_layout(title=f"[{target_sc}] 1인당 실적 비교", barmode='group')
+            c1.plotly_chart(fig_bar, use_container_width=True)
+            fig_rate = px.bar(df_detail, x='근무형태', y='인건비율', color='근무형태', text='인건비율', title=f"[{target_sc}] 인건비율 (%)")
+            fig_rate.update_traces(texttemplate='%{text:.1f}%')
+            c2.plotly_chart(fig_rate, use_container_width=True)
+
+    with tab4:
+        st.info("💡 **[▼]** 표시된 항목은 합계, **[└]** 는 상세 내역입니다.")
+        selected_key = st.selectbox("검증할 대상", list(global_debug.keys()))
+        if selected_key:
+            records = global_debug[selected_key]
+            df_debug = pd.DataFrame(records, columns=["항목", "금액(원)", "비고"])
+            def highlight_row(row):
+                if "최종" in row["항목"]: return ['background-color: #dff9fb; font-weight: bold; color: black'] * len(row)
+                elif "▼" in row["항목"]: return ['background-color: #f1f2f6; font-weight: bold; color: #2c3e50'] * len(row)
+                elif row["금액(원)"] < 0: return ['background-color: white; color: #c0392b'] * len(row)
+                else: return ['background-color: white; color: #2980b9'] * len(row)
+            st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=1200)
+
+    # [수정된 AI 탭 - 스트리밍 + 키 로테이션]
+    with tab5:
+        st.subheader("🤖 AI 경영 컨설턴트")
+        st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
+        
+        system_keys = get_api_keys()
+        user_key = None
+        final_key_list = []
+        
+        if system_keys:
+            final_key_list = system_keys
+        else:
+            st.info("💡 등록된 시스템 키가 없습니다. 개인 API Key를 입력해주세요.")
+            user_key = st.text_input("Google API Key", type="password")
+            if user_key:
+                final_key_list = [user_key]
+        
+        if st.button("AI 분석 요청하기"):
+            if not final_key_list:
+                st.error("API Key가 없습니다.")
+            else:
+                today_date = datetime.now().strftime("%Y년 %m월 %d일")
+                context_info = f"""
+                [기초 환경 데이터]
+                - 현재 총 기사 수: {total_drivers}명 / 총 차량 대수: {n_cars}대
+                - LPG 단가: {lpg_price}원/L (VAT포함)
+                - 월 만근일수: {full_days}일
+                - 차량 1대당 월 고정비(감가+보험+유지): 약 {int(car_fixed_cost_monthly):,}원
+                - 월 총 고정비(임대료+관리비+유휴차량비용): 약 {int(total_overhead_sum):,}원
+                - 1인당 배부된 월 공통비: {int(cost_overhead):,}원
+                [시나리오별 상세 결과]
+                """
+                for res in all_results_data:
+                    context_info += f"\n👉 시나리오명: {res['name']}\n"
+                    context_info += f"   - 월 매출: {int(res['revenue']):,}원 / 월 영업이익: {int(res['profit']):,}원\n"
+                    context_info += f"   - 영업이익률: {res['margin']:.2f}% / 인건비율: {res['labor_rate']:.2f}%\n"
+
+                prompt = f"""
+                당신은 노련한 '택시 회사 경영 전문 컨설턴트'입니다.
+                아래 데이터(오늘 날짜: {today_date})를 바탕으로 정밀한 경영 분석 보고서를 작성하세요.
+                [분석할 데이터]
+                {context_info}
+                [작성 목차]
+                1. 🏆 최적 시나리오 선정 및 이유
+                2. ⛽ 연료비 민감도 분석 (10% 상승 시 영향)
+                3. 👥 인력 운영 전략 (일차 vs 교대, 유휴 차량 최소화 방안)
+                4. 📉 손익분기점(BEP) 추정 (최소 기사 수)
+                5. 💡 최종 경영 제언 (구체적 실행 전략)
+                톤앤매너: 전문적이고 냉철하게, 한국어로 작성.
+                """
+                
+                # [스트리밍 + 로테이션 로직]
+                st.success("✅ 심층 분석을 시작합니다...")
+                success = False
+                
+                for api_key in final_key_list:
+                    try:
+                        response_stream, model_name = get_stream_response(api_key, prompt)
+                        st.write_stream(response_stream)
+                        success = True
+                        break
+                    except Exception:
+                        continue # 다음 키 시도
+                
+                if not success:
+                    st.error("모든 API Key가 실패했거나 응답하지 않습니다. (사용량 초과 등)")
+
+else:
+    st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
+
+with st.sidebar:
+    st.markdown("---")
+    st.header("📂 데이터 저장 / 불러오기")
+    st.file_uploader("저장된 파일 열기 (JSON)", type=["json"], key="loader_widget", on_change=load_data_callback)
+    def get_current_data():
+        keys_to_save = [
+            'n_day', 'n_night', 'n_shift', 'n_daily', 'n_cars',
+            'car_price', 'car_dep_years', 'car_maint', 'insurance_year',
+            'rent_cost', 'admin_salary_total',
+            'full_days', 'lpg_price',
+            'fuel_day', 'fuel_night', 'fuel_shift', 'fuel_daily',
+            'rate_pension', 'rate_health', 'rate_care_ratio', 
+            'rate_emp_unemp', 'rate_emp_stabil', 'rate_sanjae'
+        ]
+        basic_info = {}
+        for k in keys_to_save:
+            if k in st.session_state:
+                basic_info[k] = st.session_state[k]
+        return json.dumps({"basic_info": basic_info, "scenarios": st.session_state.get('scenarios', [])}, indent=4, ensure_ascii=False)
+    st.download_button(label="💾 작업 내용 PC 저장", data=get_current_data(), file_name="taxi_profit_data.json", mime="application/json")
