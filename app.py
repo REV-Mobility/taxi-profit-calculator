@@ -538,3 +538,4 @@ with st.sidebar:
                 basic_info[k] = st.session_state[k]
         return json.dumps({"basic_info": basic_info, "scenarios": st.session_state.get('scenarios', [])}, indent=4, ensure_ascii=False)
     st.download_button(label="💾 작업 내용 PC 저장", data=get_current_data(), file_name="taxi_profit_data.json", mime="application/json")
+
