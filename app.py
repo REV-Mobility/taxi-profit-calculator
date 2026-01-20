@@ -6,6 +6,7 @@ import json
 import google.generativeai as genai
 from datetime import datetime
 import io
+import time
 
 # ---------------------------------------------------------
 # 설정 및 유틸리티
@@ -69,9 +70,7 @@ def load_data_callback():
         except Exception as e:
             st.error(f"데이터 파일 읽기 실패: {e}")
 
-# ---------------------------------------------------------
-# API Key 및 모델 로직 (스트리밍 지원 수정)
-# ---------------------------------------------------------
+# API Key 및 모델 로직
 def get_api_keys():
     keys = []
     if "GOOGLE_API_KEYS" in st.secrets:
@@ -80,39 +79,25 @@ def get_api_keys():
         keys.append(st.secrets["GOOGLE_API_KEY"])
     return keys
 
-# [핵심 수정] 텍스트가 아닌 '스트림 객체'를 반환하도록 변경
-def get_stream_response(api_key, prompt):
+# [핵심 수정] 수동 스트리밍 함수 (가장 안전한 방식)
+def stream_response_manual(api_key, prompt):
     genai.configure(api_key=api_key)
-    valid_model_name = None
     
-    # 1. 모델 탐색 (Flash 우선)
+    # 1. 모델 자동 선택 (Flash 우선)
+    valid_model = 'gemini-1.5-flash' # 기본값
     try:
-        # 속도가 빠른 Flash 모델을 최우선으로 강제 지정
-        priority_list = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
-        
-        # list_models가 느릴 수 있으므로, 바로 생성 시도하는 것이 속도엔 유리함
-        # 여기서는 안정성을 위해 기존 로직 유지하되 Flash 우선
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        for p_model in priority_list:
-            full_name = f"models/{p_model}"
-            if full_name in available_models:
-                valid_model_name = p_model # 모델명만 추출
-                break
-        
-        if not valid_model_name and available_models:
-            valid_model_name = available_models[0].replace("models/", "")
-            
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        if 'models/gemini-1.5-flash' in models: valid_model = 'gemini-1.5-flash'
+        elif 'models/gemini-1.5-pro' in models: valid_model = 'gemini-1.5-pro'
+        elif 'models/gemini-pro' in models: valid_model = 'gemini-pro'
     except:
-        valid_model_name = 'gemini-1.5-flash' # 실패시 Flash 강제 시도
+        pass # 에러나면 그냥 flash 시도
 
-    if not valid_model_name:
-        raise Exception("사용 가능한 모델을 찾을 수 없습니다.")
-
-    # 2. 스트리밍 호출 (stream=True)
-    model = genai.GenerativeModel(valid_model_name)
+    model = genai.GenerativeModel(valid_model)
+    
+    # 2. 스트리밍 요청
     response = model.generate_content(prompt, stream=True)
-    return response, valid_model_name
+    return response, valid_model
 
 st.title("🚖 택시회사 급여 수익성 분석툴 with 레브모빌리티")
 st.markdown("---")
@@ -281,20 +266,25 @@ if st.session_state.scenarios:
             net_fuel_cost = fuel_liter * (lpg_price / 1.1)
             c_dep, c_ins, c_maint = get_car_cost_details(d_type)
             total_car_fixed = c_dep + c_ins + c_maint
+            
             total_pay = pay
             taxable_pay = pay - tf
             if taxable_pay < 0: taxable_pay = 0
             severance = total_pay / 12 
             annual_leave = hourly_wage * work_time_sc * 1.25
+            
             ins_pension = taxable_pay * rate_pension
             ins_health = taxable_pay * rate_health
             ins_care = ins_health * rate_care_ratio
             ins_emp = taxable_pay * (rate_emp_unemp + rate_emp_stabil)
             ins_sanjae = total_pay * rate_sanjae
+            
             total_4ins = ins_pension + ins_health + ins_care + ins_emp + ins_sanjae
             total_labor_cost = total_pay + severance + annual_leave + total_4ins
+            
             total_cost_person = (vat_out + card_fee + net_fuel_cost + total_car_fixed + total_labor_cost + cost_overhead)
             profit_person = monthly_sanap - total_cost_person
+            
             group_profit = profit_person * count
             total_profit += group_profit
             total_revenue += (monthly_sanap * count)
@@ -308,6 +298,7 @@ if st.session_state.scenarios:
                 "1인 인건비": total_labor_cost,
                 "인건비율": labor_ratio
             })
+            
             rows = []
             rows.append(("1. 월 매출(사납금)", monthly_sanap, f"{sanap:,}원 × {full_days}일"))
             rows.append(("▼ 매출 공제(세금/수수료)", -(vat_out + card_fee), ""))
@@ -447,9 +438,10 @@ if st.session_state.scenarios:
                 elif "▼" in row["항목"]: return ['background-color: #f1f2f6; font-weight: bold; color: #2c3e50'] * len(row)
                 elif row["금액(원)"] < 0: return ['background-color: white; color: #c0392b'] * len(row)
                 else: return ['background-color: white; color: #2980b9'] * len(row)
+            # 높이 1200px로 증가
             st.dataframe(df_debug.style.apply(highlight_row, axis=1).format({"금액(원)": "{:,.0f}"}), use_container_width=True, height=1200)
 
-    # [수정된 AI 탭 - 스트리밍 + 키 로테이션]
+    # [수정된 AI 탭 - 수동 스트리밍 적용]
     with tab5:
         st.subheader("🤖 AI 경영 컨설턴트")
         st.markdown("입력된 시나리오 데이터를 분석하여 **수익 개선 전략**을 제안합니다.")
@@ -500,21 +492,28 @@ if st.session_state.scenarios:
                 톤앤매너: 전문적이고 냉철하게, 한국어로 작성.
                 """
                 
-                # [스트리밍 + 로테이션 로직]
-                st.success("✅ 심층 분석을 시작합니다...")
                 success = False
+                result_container = st.empty() # 결과를 표시할 빈 공간 생성
                 
                 for api_key in final_key_list:
                     try:
-                        response_stream, model_name = get_stream_response(api_key, prompt)
-                        st.write_stream(response_stream)
+                        response_stream, model_name = stream_response_manual(api_key, prompt)
+                        # [핵심] 수동 스트리밍 루프
+                        full_text = ""
+                        for chunk in response_stream:
+                            if chunk.text:
+                                full_text += chunk.text
+                                result_container.markdown(full_text + "▌") # 커서 효과
+                        
+                        result_container.markdown(full_text) # 최종 완료
+                        st.success("✅ 심층 분석 완료!")
                         success = True
                         break
-                    except Exception:
+                    except Exception as e:
                         continue # 다음 키 시도
                 
                 if not success:
-                    st.error("모든 API Key가 실패했거나 응답하지 않습니다. (사용량 초과 등)")
+                    st.error("모든 API Key가 실패했습니다. (사용량 초과 또는 네트워크 오류)")
 
 else:
     st.info("👈 왼쪽 사이드바에서 시나리오를 등록해주세요.")
